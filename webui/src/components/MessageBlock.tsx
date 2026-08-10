@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { HighlightRange, MessageItem } from "../types";
+import type { DisplayTextChunk, HighlightRange, MessageItem } from "../types";
 import { formatDate, roleLabel } from "../utils/format";
 import { CopyLimitError, IncompleteDisplayRecoveryError, MAX_BROWSER_COPY_BYTES, MAX_BROWSER_COPY_CHARS, getMessageDisplayChunk, getRawMessage, isRecoverableDisplayCursorError } from "../api/client";
 import type { MessageLayout } from "../settings";
@@ -35,6 +35,14 @@ interface PreservedMessageState {
 const preservedMessageStates = new Map<string, PreservedMessageState>();
 const PRESERVED_STATE_MAX_ENTRIES = 100;
 const PRESERVED_STATE_MAX_CHARS = 4 * 1024 * 1024;
+
+function displayChunkIsComplete(chunk: DisplayTextChunk): boolean {
+  return !chunk.has_more && chunk.total_chars_exact;
+}
+
+function displayChunkCanContinue(chunk: DisplayTextChunk, currentOffset: number): boolean {
+  return chunk.has_more && chunk.next_offset !== null && chunk.next_offset > currentOffset && chunk.next_cursor !== null;
+}
 
 function preserveMessageState(key: string, state: PreservedMessageState, showRawDefault: boolean) {
   if (
@@ -169,6 +177,11 @@ export default function MessageBlock({ message, conversationId, stateContextKey,
       return;
     }
     if (!message.display_text_truncated && expandedText === null) {
+      if (message.display_text_total_chars_exact === false) {
+        setDisplayRecoveryIncomplete(true);
+        setDisplayError(t("displayRecoveryIncomplete"));
+        return;
+      }
       await onCopy(text || message.raw_preview || "");
       return;
     }
@@ -191,7 +204,9 @@ export default function MessageBlock({ message, conversationId, stateContextKey,
           while (true) {
             const chunk = await getMessageDisplayChunk(conversationId, message.node_id, offset, 1048576, controller.signal, cursor);
             if (requestId !== displayRequestIdRef.current || requestIdentity !== messageIdentityRef.current) return;
-            if (chunk.resolver_input_truncated || (!chunk.has_more && !chunk.total_chars_exact)) {
+            const completeChunk = displayChunkIsComplete(chunk);
+            const continuableChunk = displayChunkCanContinue(chunk, offset);
+            if (chunk.resolver_input_truncated || (!completeChunk && !continuableChunk)) {
               setDisplayRecoveryIncomplete(true);
               throw new IncompleteDisplayRecoveryError();
             }
@@ -200,7 +215,8 @@ export default function MessageBlock({ message, conversationId, stateContextKey,
               throw new CopyLimitError();
             }
             candidate += chunk.display_text;
-            if (!chunk.has_more || chunk.next_offset === null) break;
+            if (completeChunk) break;
+            if (chunk.next_offset === null) throw new IncompleteDisplayRecoveryError();
             offset = chunk.next_offset;
             cursor = chunk.next_cursor;
           }
@@ -435,12 +451,14 @@ export default function MessageBlock({ message, conversationId, stateContextKey,
     try {
       const chunk = await getMessageDisplayChunk(conversationId, message.node_id, offset, 1048576, controller.signal, displayNextCursor);
       if (requestId !== displayRequestIdRef.current || requestIdentity !== messageIdentityRef.current) return;
-      const incomplete = chunk.resolver_input_truncated || (!chunk.has_more && !chunk.total_chars_exact);
+      const completeChunk = displayChunkIsComplete(chunk);
+      const continuableChunk = displayChunkCanContinue(chunk, offset);
+      const incomplete = chunk.resolver_input_truncated || (!completeChunk && !continuableChunk);
       if (incomplete) setDisplayRecoveryIncomplete(true);
       setExpandedText((current) => offset === 0 ? chunk.display_text : `${current ?? ""}${chunk.display_text}`);
       setDisplayNextOffset(chunk.next_offset);
       setDisplayNextCursor(chunk.next_cursor);
-      if (!chunk.has_more) {
+      if (completeChunk || incomplete) {
         if (focusFrameRef.current !== null) window.cancelAnimationFrame(focusFrameRef.current);
         focusFrameRef.current = window.requestAnimationFrame(() => {
           focusFrameRef.current = null;

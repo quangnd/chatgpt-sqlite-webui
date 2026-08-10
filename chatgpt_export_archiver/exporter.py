@@ -12,7 +12,7 @@ from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from .current_path import ensure_effective_current_views, resolve_effective_current_collection
 from .db import record_export
-from .parser import recover_message_display_text
+from .parser import is_generated_non_text_placeholder, recover_message_display_text
 from .search import _is_internal_message
 from .utils import epoch_to_date_part, epoch_to_display, finite_float_or_none, parse_date_boundary, safe_filename_part, sha256_text, truncate_utf8, write_chunks_if_changed
 
@@ -1326,3 +1326,45 @@ def iter_copy_conversation(nodes: Iterable[Mapping[str, Any]]) -> Iterator[str]:
             yield "\n\n"
         first = False
         yield f"{node['role'] or 'message'}:\n{content_text}"
+
+
+def iter_selected_copy_nodes(
+    conn: sqlite3.Connection,
+    selected: Iterable[tuple[str, int]],
+) -> Iterator[dict[str, Any]]:
+    """Yield copy rows without projecting unrelated raw JSON payloads."""
+
+    for expected_node_id, storage_rowid in selected:
+        row = conn.execute(
+            """SELECT node_id, role, content_type, content_text,
+                      raw_message_json IS NULL AS raw_is_null
+               FROM conversation_nodes WHERE rowid = ?""",
+            (storage_rowid,),
+        ).fetchone()
+        if row is None or str(row["node_id"]) != expected_node_id:
+            raise ExportResourceLimitError("copy_selection_stale")
+        canonical = _optional_row_value(row, "content_text")
+        raw_message_json: str | None = None
+        if (
+            (not canonical or is_generated_non_text_placeholder(str(canonical)))
+            and not bool(row["raw_is_null"])
+        ):
+            with conn.blobopen(
+                "conversation_nodes",
+                "raw_message_json",
+                int(storage_rowid),
+                readonly=True,
+            ) as blob:
+                raw_size = len(blob)
+                if raw_size <= 800_004:
+                    raw_bytes = blob.read(raw_size)
+                    candidate = raw_bytes.decode("utf-8", errors="replace")
+                    if len(candidate) <= 200_000:
+                        raw_message_json = candidate
+        yield {
+            "node_id": expected_node_id,
+            "role": row["role"],
+            "content_type": row["content_type"],
+            "content_text": canonical,
+            "raw_message_json": raw_message_json,
+        }

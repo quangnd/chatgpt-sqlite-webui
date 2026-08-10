@@ -200,6 +200,12 @@ export default function ConversationPane({ conversation, query, filters, matchMo
     () => messages.filter((message) => !message.is_empty_mapping_node && (showInternal || !message.is_internal)),
     [messages, showInternal],
   );
+  const copyableVisibleNodeIds = useMemo(
+    () => visibleMessages
+      .filter((message) => !message.is_empty_mapping_node)
+      .map((message) => message.node_id),
+    [visibleMessages],
+  );
   const messageKeys = useMemo(() => {
     const counts = new Map<string, number>();
     const keys = new Map<MessageItem, string>();
@@ -583,11 +589,13 @@ export default function ConversationPane({ conversation, query, filters, matchMo
       const copyValue = mode === "conversation"
         ? await getConversationCopyText(conversation!.conversation_id, effectivePath, showInternal, controller.signal)
         : await (() => {
-          const nodeIds = visibleMessages
-            .filter((message) => !message.is_empty_mapping_node)
-            .map((message) => message.node_id);
-          if (nodeIds.length > MAX_VISIBLE_COPY_SELECTION) throw new CopyLimitError();
-          return getVisibleMessagesCopyText(conversation!.conversation_id, nodeIds, controller.signal);
+          if (!copyableVisibleNodeIds.length) return "";
+          if (copyableVisibleNodeIds.length > MAX_VISIBLE_COPY_SELECTION) throw new CopyLimitError();
+          return getVisibleMessagesCopyText(
+            conversation!.conversation_id,
+            copyableVisibleNodeIds,
+            controller.signal,
+          );
         })();
       if (readerDataContextRef.current !== requestedContextKey || requestId !== copyRequestRef.current) return;
       await copyText(copyValue, requestedContextKey, requestId);
@@ -704,7 +712,7 @@ export default function ConversationPane({ conversation, query, filters, matchMo
           </label>
           <button type="button" onClick={() => jump(-1)} disabled={!currentViewHits.length}>{t("prevHit")}</button>
           <button type="button" onClick={() => jump(1)} disabled={!currentViewHits.length}>{t("nextHit")}</button>
-          <button type="button" onClick={copyVisible} disabled={Boolean(copyBusy)}>{copyBusy === "visible" ? t("preparingCopy") : t("copyVisible")}</button>
+          <button type="button" onClick={copyVisible} disabled={Boolean(copyBusy) || copyableVisibleNodeIds.length === 0}>{copyBusy === "visible" ? t("preparingCopy") : t("copyVisible")}</button>
           <button type="button" onClick={copyConversation} disabled={Boolean(copyBusy)}>{copyBusy === "conversation" ? t("preparingCopy") : effectivePath === "all" ? t("copyAllNodesConversation") : t("copyConversation")}</button>
           <a className="button-link" href={exportUrl(conversation.conversation_id, "md", effectivePath, showInternal)} title={t("downloadUsesCurrentReaderPath")}>{t("downloadMd")}</a>
           <a className="button-link" href={exportUrl(conversation.conversation_id, "txt", effectivePath, showInternal)} title={t("downloadUsesCurrentReaderPath")}>{t("downloadTxt")}</a>

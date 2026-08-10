@@ -28,6 +28,7 @@ from .exporter import (
     MAX_EXPORT_OUTPUT_BYTES,
     iter_conversation_export_nodes,
     iter_copy_conversation,
+    iter_selected_copy_nodes,
     iter_rendered_conversation,
     validate_conversation_export_budget,
 )
@@ -101,6 +102,7 @@ from .utils import finite_float_or_none, safe_filename_part, utc_now_iso
 from .web_db import (
     DISPLAY_TEXT_RESOLVER_VERSION,
     NORMALIZATION_INDEX_FORMAT_VERSION,
+    _PROCESS_LOCK_MAX_HELD_RANGES,
     WEB_INDEX_BUILD_STAGES,
     WEB_INDEX_FTS_BIND_BATCH_BYTES,
     WEB_INDEX_MAX_DERIVED_BYTES,
@@ -407,6 +409,35 @@ def _upload_policy_schema(policy: UploadPolicy) -> dict[str, object]:
         "local_profile": policy.remote_profile in {"local", "local_profile"},
         "remote_access_requires_opt_in": policy.remote,
     }
+
+
+def _multipart_spool_snapshot(file: UploadFile) -> dict[str, Any]:
+    """Describe Starlette's already-parsed upload spool without exposing a path."""
+
+    spool = getattr(file, "file", None)
+    result: dict[str, Any] = {
+        "observable": False,
+        "rolled_to_disk": None,
+        "observed_bytes": None,
+        "memory_threshold_bytes": None,
+    }
+    if spool is None:
+        return result
+    rolled = getattr(spool, "_rolled", None)
+    threshold = getattr(spool, "_max_size", None)
+    result["rolled_to_disk"] = bool(rolled) if isinstance(rolled, bool) else None
+    result["memory_threshold_bytes"] = (
+        int(threshold) if isinstance(threshold, int) and threshold >= 0 else None
+    )
+    try:
+        position = spool.tell()
+        spool.seek(0, os.SEEK_END)
+        result["observed_bytes"] = int(spool.tell())
+        spool.seek(position, os.SEEK_SET)
+        result["observable"] = True
+    except (AttributeError, OSError, ValueError):
+        pass
+    return result
 
 
 def create_api_router(
@@ -768,7 +799,7 @@ def create_api_router(
                 "limits": {"conversation_id": MAX_LEGACY_ID_PARAM_LENGTH, "around_node_id": MAX_LEGACY_ID_PARAM_LENGTH, "q": 500, "title": 200, "exact": 300, "exclude": 200, "source": 200, "after": MAX_DATE_PARAM_LENGTH, "before": MAX_DATE_PARAM_LENGTH, "offset": MAX_SQLITE_OFFSET},
                 "raw": "message pages return raw_preview only; capped raw preview is available per message endpoint",
                 "item_fields": ["node_id", "parent_node_id", "message_id", "role", "author_name", "create_time", "update_time", "content_type", "display_text", "display_text_truncated", "display_text_total_chars", "display_text_total_chars_exact", "display_text_resolver_input_truncated", "display_text_returned_chars", "has_text", "has_raw", "raw_preview", "raw_preview_truncated", "content_hash", "is_on_current_path", "effective_visible_in_current_view", "is_internal", "is_empty_mapping_node", "highlight_ranges", "highlight_ranges_truncated", "highlight_scanned_chars", "highlight_range_limit_reached"],
-                "display_text_contract": "display_text is the bounded reader preview of the resolved user-visible body; total_chars_exact=false can mean a normal cursor-expandable canonical body, while display_text_resolver_input_truncated=true means raw fallback cannot be completely recovered; use the display chunk endpoint for explicit expansion and copy",
+                "display_text_contract": "display_text is the bounded reader preview of the resolved user-visible body. A display chunk is complete only when has_more=false and total_chars_exact=true. has_more=true always includes a forward next_offset; terminal inexact recovery returns has_more=false and total_chars_exact=false. display_text_resolver_input_truncated=true separately reports an exhausted raw fallback budget.",
                 "budgets": {
                     "message_display_chars": effective_reader_budget.message_display_chars,
                     "page_display_chars": effective_reader_budget.page_display_chars,
@@ -844,6 +875,7 @@ def create_api_router(
                 "locking": "all writer entry points share one process lock. A private per-user registry contains at most 64 fixed project-owned shard files and no database pathname; each database identity uses a deterministic sparse byte-range lock, so unrelated identities that choose the same shard file do not falsely contend. Path and existing file-entity aliases still share their identity ranges, a newly created database is entity-bound before work, and identity is revalidated before publication. Upload admission acquires this lock before multipart spooling. A durable owner-token lease provides the database-local second layer. Windows fails closed before registry, spool, database creation, lease, or staging until an equivalent File-ID/reparse-safe backend exists.",
                 "writer_lock": {
                     "registry_max_files": 64,
+                    "process_max_held_ranges": _PROCESS_LOCK_MAX_HELD_RANGES,
                     "scope": ["init", "migrate", "import", "web-index", "web-upload-admission", "web-import-job"],
                     "windows": "writer_process_lock_unsupported",
                     "busy": "writer_process_lock_busy",
@@ -959,14 +991,15 @@ def create_api_router(
                     "forwarded_headers": "strict edge-proxy model: ignored from untrusted peers; a trusted direct edge must overwrite client values and provide at most one Forwarded element or one X-Forwarded-Host/Proto value; duplicates, chains, malformed syntax, and conflicts are rejected",
                 },
                 "limits_note": "ZIP size checks run before import; JSON parsing and SQLite writes still consume memory, disk, and CPU proportional to decoded conversation JSON size; one top-level JSON element is independently capped at 32 MiB of UTF-8 input, 32 Mi decoded characters, and 5000 mapping nodes.",
-                "zip64": "Python zipfile and this pipeline accept ZIP64 structures, including forced-ZIP64 members; a physical archive above 4 GiB is not part of the regular acceptance suite and remains subject to every configured member, byte, ratio, disk, and CPU limit.",
+                "zip64": "Python zipfile and this pipeline accept ZIP64 structures. This release completed a small forced-ZIP64 regression and a physical 5 GiB local-file parser/import check; that is not a 5 GiB HTTP upload claim, and every configured member, byte, ratio, disk, and CPU limit still applies.",
+                "spool_diagnostics": "multipart_spool reports the already-parsed framework spool separately from the project-owned upload.zip copy; observed_bytes may be unavailable when the framework spool cannot be inspected safely.",
             },
             "jobs": {
                 "endpoints": ["/api/import/jobs", "/api/import/jobs/{job_id}", "/api/import/jobs/{job_id}/web-index/cancel"],
                 "job_id": "lowercase 32-character hexadecimal UUID; invalid syntax returns invalid_job_id and a valid unknown ID returns job_not_found",
                 "statuses": ["queued", "running", "succeeded", "failed", "postcheck_failed"],
                 "outcomes": ["queued", "import_running", "import_job_start_failed", "input_preflight_failed", "source_scan_failed", "source_read_failed", "json_decode_failed", "top_level_contract_failed", "import_transaction_failed", "canonical_commit_succeeded", "verify_failed", "stats_failed", "web_index_failed", "web_index_cancelled", "succeeded"],
-                "fields": ["status", "stage", "outcome", "completion_outcome", "canonical_import_outcome", "canonical_commit_succeeded", "error_code", "error_type", "cleanup_warning", "cleanup_warnings", "summary", "verify", "stats", "web_index", "web_index_cancel_requested", "web_index_cancelled", "stage_timings"],
+                "fields": ["status", "stage", "outcome", "completion_outcome", "canonical_import_outcome", "canonical_commit_succeeded", "error_code", "error_type", "cleanup_warning", "cleanup_warnings", "summary", "verify", "stats", "web_index", "web_index_cancel_requested", "web_index_cancelled", "stage_timings", "multipart_spool"],
                 "completion_outcomes": ["queued", "running", "success", "success_with_warnings", "partial_success", "failed_before_commit", "failed_after_canonical_commit", "cleanup_warning", "cancelled"],
                 "canonical_import_outcomes": ["queued", "running", "success", "success_with_warnings", "partial_success", "failed_before_commit"],
                 "summary_contract": {
@@ -1017,7 +1050,7 @@ def create_api_router(
                 "id_fields": ["conversation_id", "exported_conversation_id", "mapping_node_key", "node_id", "message_id", "current_node", "parent", "children"],
                 "overlong_id": "the conversation element is skipped with canonical_id_too_long; IDs are never truncated",
                 "zip_source_read_codes": ["encrypted_zip_member_not_supported", "zip_member_not_found", "source_changed_during_read", "zip_member_crc_failed", "zip_member_read_failed"],
-                "zip64": {"runtime_supported": True, "small_forced_fixture_tested": True, "physical_over_4_gib_acceptance_tested": False},
+                "zip64": {"runtime_supported": True, "small_forced_fixture_tested": True, "physical_over_4_gib_acceptance_tested": True},
             },
             "ui_state": {
                 "canonical_copy_url": ["match_mode", "layout", "show_internal", "sort", "path", "scope", "q", "role", "title", "exact", "exclude", "source", "after", "before", "selected conversation"],
@@ -1161,6 +1194,7 @@ def create_api_router(
         upload_file_closed = False
         primary_http_error: HTTPException | None = None
         filename = file.filename or "upload.zip"
+        multipart_spool = _multipart_spool_snapshot(file)
         try:
             if not filename.lower().endswith(".zip"):
                 raise HTTPException(status_code=400, detail="uploaded_file_not_zip")
@@ -1198,6 +1232,7 @@ def create_api_router(
                     filename=Path(filename.replace("\\", "/")).name,
                     size=size,
                     upload_seconds=time.perf_counter() - upload_started,
+                    multipart_spool=multipart_spool,
                 )
             except ImportJobStartError as exc:
                 detail: dict[str, Any] = {
@@ -1698,38 +1733,28 @@ def create_api_router(
         # this check and every later streamed row share the same snapshot.
         # Selecting identities only avoids materializing potentially large
         # message bodies twice.
-        selected_count = 0
+        selected_storage: dict[str, int] = {}
         for start in range(0, len(node_ids), VISIBLE_COPY_QUERY_BATCH):
             requested = node_ids[start : start + VISIBLE_COPY_QUERY_BATCH]
             placeholders = ",".join("?" for _ in requested)
-            selected_count += sum(
-                1
-                for _row in conn.execute(
-                    f"""SELECT node_id FROM conversation_nodes
+            for selected_row in conn.execute(
+                    f"""SELECT rowid AS storage_rowid, node_id FROM conversation_nodes
                         WHERE conversation_id = ? AND node_id IN ({placeholders})""",
                     [conversation_id, *requested],
+                ):
+                selected_storage[str(selected_row["node_id"])] = int(
+                    selected_row["storage_rowid"]
                 )
-            )
-        if selected_count != len(node_ids):
+        if len(selected_storage) != len(node_ids):
             raise HTTPException(status_code=409, detail="copy_selection_stale")
 
-        def selected_nodes() -> Iterator[sqlite3.Row]:
-            for start in range(0, len(node_ids), VISIBLE_COPY_QUERY_BATCH):
-                requested = node_ids[start : start + VISIBLE_COPY_QUERY_BATCH]
-                placeholders = ",".join("?" for _ in requested)
-                rows = {
-                    str(row["node_id"]): row
-                    for row in conn.execute(
-                        f"""SELECT * FROM conversation_nodes
-                            WHERE conversation_id = ? AND node_id IN ({placeholders})""",
-                        [conversation_id, *requested],
-                    )
-                }
-                for node_id in requested:
-                    yield rows[node_id]
-
         return StreamingResponse(
-            iter_copy_conversation(selected_nodes()),
+            iter_copy_conversation(
+                iter_selected_copy_nodes(
+                    conn,
+                    ((node_id, selected_storage[node_id]) for node_id in node_ids),
+                )
+            ),
             media_type="text/plain; charset=utf-8",
         )
 

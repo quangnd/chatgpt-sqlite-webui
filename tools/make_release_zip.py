@@ -3,6 +3,7 @@ from __future__ import annotations
 """Generate and atomically publish a verified runnable release ZIP."""
 
 import argparse
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -21,14 +22,15 @@ INCLUDE_PATHS = [
     "webui/package-lock.json", "README.md", "README.zh-CN.md",
     "README.zh-TW.md", "README.ja-JP.md", "README.es-ES.md", "LICENSE",
     "AGENTS.md", ".gitignore", "requirements-web.txt", "constraints-web-py312.txt",
-    "requirements-web-py312-macos-arm64.lock",
-    "chatgpt-sqlite-webui-audit-report.md",
+    "constraints-web-py313.txt", "requirements-web-py312-macos-arm64.lock",
+    "requirements-web-py313-macos-arm64.lock",
 ]
 
 AUTHORITATIVE_REQUIRED_FILES = (
     "chatgpt_archive.py",
     "chatgpt_export_archiver/__init__.py",
     "chatgpt_export_archiver/current_path.py",
+    "chatgpt_export_archiver/disk_resources.py",
     "chatgpt_export_archiver/display_resolver.py",
     "chatgpt_export_archiver/search.py",
     "chatgpt_export_archiver/exporter.py",
@@ -79,8 +81,10 @@ AUTHORITATIVE_REQUIRED_FILES = (
     "tests/test_web_api.py",
     "tests/test_round11.py",
     "tests/test_round12.py",
+    "tests/test_resource_security_regressions.py",
     "tests/fixtures/legacy-fa37b3d.sql",
     "tests/fixtures/legacy-fa37b3d.json",
+    "tests/fixtures/optional-web-index-format3.sql",
     "webui/tests/dom-smoke.mjs",
     "webui/scripts/build.mjs",
     "webui/package.json",
@@ -88,11 +92,12 @@ AUTHORITATIVE_REQUIRED_FILES = (
     "requirements-web.txt",
     "constraints-web-py312.txt",
     "requirements-web-py312-macos-arm64.lock",
+    "constraints-web-py313.txt",
+    "requirements-web-py313-macos-arm64.lock",
     "README.md", "README.zh-CN.md", "README.zh-TW.md", "README.ja-JP.md", "README.es-ES.md",
     "AGENTS.md",
     "LICENSE",
     ".gitignore",
-    "chatgpt-sqlite-webui-audit-report.md",
     "webui/dist/index.html",
 )
 
@@ -100,6 +105,41 @@ AUTHORITATIVE_REQUIRED_FILES = (
 REQUIRED_LEAF_PATHS = AUTHORITATIVE_REQUIRED_FILES
 
 MANIFEST_NAME = "RELEASE-MANIFEST.json"
+
+
+@dataclass(frozen=True)
+class ReleaseBuildResult:
+    manifest: list[dict[str, object]]
+    asset_count: int
+    published: bool
+    durability_confirmed: bool | str
+    publication_verified: bool
+
+    def __iter__(self):
+        # Preserve the historical two-value unpacking contract.
+        yield self.manifest
+        yield self.asset_count
+
+
+class DirectoryDurabilityError(OSError):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class ReleasePublicationError(OSError):
+    def __init__(
+        self,
+        code: str,
+        *,
+        durability_confirmed: bool | str,
+        publication_verified: bool,
+    ) -> None:
+        super().__init__(code)
+        self.code = code
+        self.published = True
+        self.durability_confirmed = durability_confirmed
+        self.publication_verified = publication_verified
 
 EXCLUDE_GLOBS = [
     ".git", ".git/**", "node_modules", "**/node_modules/**", "__pycache__",
@@ -220,6 +260,10 @@ def _fixed_zip_info(relative: str) -> zipfile.ZipInfo:
     return info
 
 
+def _fsync_archive_file(descriptor: int) -> None:
+    os.fsync(descriptor)
+
+
 def _write_archive_paths(
     path: Path,
     payload: list[tuple[str, Path]],
@@ -237,7 +281,7 @@ def _write_archive_paths(
         with archive.open(_fixed_zip_info(MANIFEST_NAME), "w", force_zip64=True) as destination:
             destination.write(manifest_bytes)
     with path.open("r+b") as handle:
-        os.fsync(handle.fileno())
+        _fsync_archive_file(handle.fileno())
 
 
 def _verify_archive_paths(
@@ -299,7 +343,7 @@ def _write_archive_test_only(path: Path, payload: dict[str, bytes]) -> None:
             write_member(archive, relative, data)
         write_member(archive, MANIFEST_NAME, _manifest_bytes(payload))
     with path.open("r+b") as handle:
-        os.fsync(handle.fileno())
+        _fsync_archive_file(handle.fileno())
 
 
 def _verify_archive_test_only(path: Path, payload: dict[str, bytes]) -> list[dict[str, object]]:
@@ -333,20 +377,57 @@ def _delivery_check(root: Path, archive: Path) -> None:
         raise ValueError("delivery_check_failed " + (result.stdout + result.stderr).strip())
 
 
-def _fsync_directory(path: Path) -> None:
+def _open_release_directory(path: Path) -> int:
+    return os.open(path, os.O_RDONLY)
+
+
+def _fsync_release_directory(descriptor: int) -> None:
+    os.fsync(descriptor)
+
+
+def _fsync_directory(path: Path) -> bool | str:
+    if os.name == "nt":
+        return "unsupported"
     try:
-        descriptor = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
+        descriptor = _open_release_directory(path)
+    except OSError as exc:
+        raise DirectoryDurabilityError("release_directory_open_failed") from exc
     try:
-        os.fsync(descriptor)
-    except OSError:
-        pass
+        _fsync_release_directory(descriptor)
+    except OSError as exc:
+        raise DirectoryDurabilityError("release_directory_fsync_failed") from exc
     finally:
         os.close(descriptor)
+    return True
 
 
-def build_release(root: Path, output: Path, *, check: bool = True) -> tuple[list[dict[str, object]], int]:
+def _file_size_sha256(path: Path) -> tuple[int, str]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+    return size, digest.hexdigest()
+
+
+def _verify_published_archive(
+    path: Path,
+    *,
+    expected_size: int,
+    expected_sha256: str,
+) -> None:
+    actual_size, actual_sha256 = _file_size_sha256(path)
+    if actual_size != expected_size or actual_sha256 != expected_sha256:
+        raise ValueError("release_published_verification_failed")
+
+
+def build_release(
+    root: Path,
+    output: Path,
+    *,
+    check: bool = True,
+) -> ReleaseBuildResult:
     _validate_required(root)
     assets = _dist_assets(root)
     payload = _collect_payload_paths(root)
@@ -366,9 +447,35 @@ def build_release(root: Path, output: Path, *, check: bool = True) -> tuple[list
         manifest = _verify_archive_paths(temporary, manifest)
         if check:
             _delivery_check(root, temporary)
+        expected_size, expected_sha256 = _file_size_sha256(temporary)
         os.replace(temporary, output)
-        _fsync_directory(output.parent)
-        return manifest, len(assets)
+        try:
+            durability_confirmed = _fsync_directory(output.parent)
+        except DirectoryDurabilityError as exc:
+            raise ReleasePublicationError(
+                exc.code,
+                durability_confirmed=False,
+                publication_verified=False,
+            ) from exc
+        try:
+            _verify_published_archive(
+                output,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            )
+        except (OSError, ValueError) as exc:
+            raise ReleasePublicationError(
+                "release_published_verification_failed",
+                durability_confirmed=durability_confirmed,
+                publication_verified=False,
+            ) from exc
+        return ReleaseBuildResult(
+            manifest=manifest,
+            asset_count=len(assets),
+            published=True,
+            durability_confirmed=durability_confirmed,
+            publication_verified=True,
+        )
     finally:
         try:
             temporary.unlink()
@@ -385,12 +492,39 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     output = Path(args.output).resolve()
     try:
-        manifest, asset_count = build_release(root, output, check=args.check)
+        result = build_release(root, output, check=args.check)
+        manifest, asset_count = result
+    except ReleasePublicationError as exc:
+        print("published true")
+        print(
+            "durability_confirmed "
+            + (
+                "unsupported"
+                if exc.durability_confirmed == "unsupported"
+                else str(bool(exc.durability_confirmed)).lower()
+            )
+        )
+        print(f"publication_verified {str(exc.publication_verified).lower()}")
+        print(f"ERROR: {exc.code}")
+        return 2
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        print("published false")
+        print("durability_confirmed false")
+        print("publication_verified false")
         print(f"ERROR: {exc}")
         return 2
     manifest_data = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     print("release_zip_written true")
+    print("published true")
+    print(
+        "durability_confirmed "
+        + (
+            "unsupported"
+            if result.durability_confirmed == "unsupported"
+            else str(bool(result.durability_confirmed)).lower()
+        )
+    )
+    print("publication_verified true")
     print(f"zip_size_bytes {output.stat().st_size}")
     print(f"dist_assets_verified {asset_count}")
     print(f"manifest_files {len(manifest)}")

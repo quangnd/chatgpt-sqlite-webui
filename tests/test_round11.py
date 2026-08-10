@@ -153,7 +153,7 @@ class Round11Regressions(unittest.TestCase):
             text=True,
         )
         payload = json.loads(completed.stdout)
-        self.assertEqual(payload["schema"], "chatgpt-sqlite-webui-resource-benchmark-v3")
+        self.assertEqual(payload["schema"], "chatgpt-sqlite-webui-resource-benchmark-v5")
         sample = payload["samples"][0]
         self.assertEqual(
             sample["decoder"]["decode_calls"], sample["decoder"]["elements"]
@@ -168,6 +168,12 @@ class Round11Regressions(unittest.TestCase):
             set(sample),
             {
                 "scenario",
+                "requested_scenario",
+                "actual_scenario",
+                "alias_deprecated",
+                "measurement_mode",
+                "performance_eligible",
+                "inherited_tracemalloc_disabled",
                 "environment",
                 "fixture_sha256",
                 "wall_seconds",
@@ -181,6 +187,7 @@ class Round11Regressions(unittest.TestCase):
                 "normalizer",
                 "lock",
                 "cleanup",
+                "child_process",
             },
         )
 

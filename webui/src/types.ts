@@ -450,6 +450,12 @@ export interface ImportJob {
   canonical_commit_succeeded: boolean;
   filename: string;
   size: number;
+  multipart_spool?: {
+    observable: boolean;
+    rolled_to_disk: boolean | null;
+    observed_bytes: number | null;
+    memory_threshold_bytes: number | null;
+  } | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;

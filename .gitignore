@@ -49,6 +49,8 @@ history/
 *.sqlite3-wal
 *.zip
 chatgpt_export*.zip
+chatgpt-sqlite-webui-audit-report.md
+fix-prompt.md
 chatgpt_export*.json
 conversations*.json
 acceptance_logs/

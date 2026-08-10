@@ -2,25 +2,20 @@
 
 Idioma: [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文（臺灣）](README.zh-TW.md) | [日本語](README.ja-JP.md) | [Español](README.es-ES.md)
 
-Convierte tu ZIP oficial exportado por ChatGPT en un archivo SQLite privado y buscable.
+Convierte un ZIP oficial de exportación de ChatGPT en un archivo SQLite privado y buscable. Impórtalo desde la CLI o la Web UI local, lee y busca conversaciones en el navegador y expórtalas como Markdown o TXT. Todo se ejecuta en tu equipo.
 
-`Local-first` · `SQLite` · `Privacy-first` · `Fast import` · `Fast Web index` · `Chat-style Web UI` · `Markdown/TXT export`
-
-ChatGPT Export Archiver importa ZIP oficiales de OpenAI / ChatGPT directamente en SQLite, verifica el archivo, crea índices de búsqueda, abre una Web UI local y exporta conversaciones a Markdown o TXT. Está pensado para archivos personales a largo plazo, búsqueda offline, migración a bases de conocimiento y flujos locales que la UI oficial de historial no ofrece como archivos e índices.
+`Local primero` · `SQLite` · `Búsqueda privada` · `CLI` · `Web UI` · `Exportación Markdown/TXT`
 
 ## Por Qué Usarlo
 
-- **Local-first y privado.** El ZIP, la base de datos, los exports, las copias temporales subidas, la Web UI y los logs permanecen en tu máquina salvo que los muevas tú.
-- **Importación directa de ZIP.** Lee el ZIP oficial exportado por ChatGPT sin descomprimirlo ni fusionar shards manualmente.
-- **Preparado para archivos grandes.** La ruta recomendada admite ZIP grandes, importaciones incrementales, reconstrucción FTS diferida e índices Web opcionales optimizados.
-- **Lector estilo chat.** La Web UI usa por defecto una disposición similar a ChatGPT: user a la derecha, assistant a la izquierda, y system/internal plegados pero desplegables.
-- **La vista técnica clásica sigue disponible.** Usa Settings o `?layout=classic` / `?messageLayout=classic` para volver al diseño anterior por filas.
-- **Búsqueda de archivo más controlable.** Para archivos a largo plazo y búsqueda local, SQLite ofrece más control que la UI oficial de historial: filtros role/title/source/scope/exclude, frases, OR, paginación, verify, índices reconstruibles y exportación.
-- **Exports portables.** Markdown y TXT se generan de forma determinista y sirven para backups, bases de conocimiento locales, grep offline o migración.
+- **Privado y local.** Los ZIP, bases de datos, exportaciones, subidas temporales, la Web UI y los logs permanecen en tu equipo.
+- **Importación directa e incremental.** Lee ZIP oficiales o fragmentos JSON extraídos sin unirlos y actualiza un archivo existente con seguridad.
+- **Lectura y búsqueda cómodas.** Usa el lector tipo chat, el diseño clásico, filtros, frases, exclusiones, paginación e índices rápidos opcionales.
+- **Salida portátil.** Exporta Markdown o TXT deterministas para copias de seguridad, uso sin conexión o migración.
 
 ## Captura
 
-Captura segura pendiente. Las capturas deben usar conversaciones synthetic, no títulos reales, snippets, raw JSON, emails ni rutas locales.
+Las capturas deben usar conversaciones sintéticas y no mostrar títulos, mensajes, nombres de archivo, correos ni rutas locales reales.
 
 ## Qué Hace Este Proyecto
 
@@ -36,28 +31,20 @@ Captura segura pendiente. Las capturas deben usar conversaciones synthetic, no t
 
 ## Privacidad
 
-Todo se ejecuta localmente. La base de datos, los archivos exportados, las copias temporales subidas, la Web UI y los logs permanecen en tu máquina salvo que los muevas o publiques tú. La CLI imprime deliberadamente IDs, recuentos, marcas de tiempo y estados, no fragmentos de mensajes. Los summaries de la CLI y los logs no imprimen cuerpos de conversación, títulos, snippets, raw JSON, rutas completas de entrada/salida ni nombres reales de ZIP; el summary de importación informa solo el tipo de entrada, por ejemplo `source zip`. La Web UI está pensada para uso local y se enlaza por defecto a `127.0.0.1`.
-
-En los summaries de importación, `valid_conversations` cuenta los elementos conversation de entrada que se parsearon correctamente antes de fusionar ids duplicados. Cuando se fusionan ids duplicados, puede ser mayor que los recuentos finales de cambios en base de datos: `inserted_conversations`, `updated_conversations` o `unchanged_conversations`.
-
-`inspect` y los errores del scanner no imprimen por defecto nombres reales de ZIP ni rutas completas. Los comandos CLI que requieren una base de datos existente, como `verify`, `stats`, `search` y `export`, informan `database_not_found` cuando la ruta de la base de datos es incorrecta y no crean un archivo SQLite vacío. La búsqueda Web usa los índices trigram opcionales como capa de candidatos cuando están disponibles, y luego sigue aplicando los filtros de subcadena normalizados, de modo que las consultas cortas, símbolos y casos sin soporte trigram vuelven de forma segura al fallback.
-
-`--delete-input-on-success` es ahora una opción de compatibilidad fail-closed. Los primitives Python/OS disponibles no excluyen a un writer no cooperativo que abrió el mismo inode antes de la verificación final, por lo que producción devuelve `delete_input_secure_identity_unsupported` antes de DB, journal, staging o rename. La importación normal nunca borra la entrada; `recover-delete-input` queda solo para journals propios de ejecuciones históricas compatibles.
-
-La base de datos y los Markdown / TXT exportados pueden contener conversaciones privadas. Trata `archive/*.db`, los archivos exportados y tus ZIP originales de ChatGPT como datos sensibles.
+Todo se ejecuta en local y la Web UI se enlaza a `127.0.0.1` por defecto. Las importaciones normales no eliminan el ZIP original; las subidas del navegador usan una copia temporal del servidor. La base de datos y las exportaciones contienen conversaciones privadas, así que guárdalas de forma segura.
 
 ## Requisitos
 
-- Python 3.10 o más reciente. Python 3.12 es el objetivo probado para instalaciones Web reproducibles.
-- SQLite con soporte JSON. FTS5 es opcional; si no está disponible o falta `message_fts`, se conserva la búsqueda segura por escaneo.
-- Node.js y npm solo si quieres reconstruir la Web UI en React o ejecutar comprobaciones de frontend. La entrega runnable incluye `webui/dist`, así que el uso local normal de la Web UI no requiere reconstruir el frontend.
-- La CLI principal usa solo la biblioteca estándar de Python. Para ejecutar la Web UI, incluida la subida ZIP, instala `requirements-web.txt`; sin ese perfil el comando `web` falla de inmediato con una indicación de instalación.
+- Python 3.10 o posterior; las dependencias Web se prueban con Python 3.13.
+- SQLite con JSON. FTS5 es opcional porque la búsqueda por escaneo sigue disponible.
+- Node.js y npm solo son necesarios para reconstruir o probar la Web UI de React.
+- La CLI usa la biblioteca estándar de Python. Instala `requirements-web.txt` para ejecutar la Web UI y subir ZIP desde el navegador.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
-python -m pip install -r requirements-web.txt -c constraints-web-py312.txt
+python -m pip install -r requirements-web.txt -c constraints-web-py313.txt
 ```
 
 En Windows PowerShell:
@@ -66,7 +53,7 @@ En Windows PowerShell:
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
-python -m pip install -r requirements-web.txt -c constraints-web-py312.txt
+python -m pip install -r requirements-web.txt -c constraints-web-py313.txt
 ```
 
 En Windows cmd.exe:
@@ -75,10 +62,8 @@ En Windows cmd.exe:
 py -3 -m venv .venv
 .venv\Scripts\activate.bat
 python -m pip install -U pip
-python -m pip install -r requirements-web.txt -c constraints-web-py312.txt
+python -m pip install -r requirements-web.txt -c constraints-web-py313.txt
 ```
-
-El archivo constraints de Python 3.12 es un perfil portable sin hashes de artifacts. `requirements-web-py312-macos-arm64.lock` solo sirve para CPython 3.12/macOS arm64. La instalación con `pip --require-hashes --only-binary=:all:` verifica los bytes del wheel descargado; `python tools/verify_web_hash_lock.py` solo comprueba estructura, target, versiones y sintaxis de hashes. Otros sistemas deben usar el perfil portable desde un index confiable.
 
 ## Inicio rápido
 
@@ -181,17 +166,11 @@ Exporta un rango de fechas y reescribe archivos existentes si hace falta. Los l�
 python chatgpt_archive.py export --db archive/chatgpt_archive.db --format md --out exports --from 2024-01-01 --to 2024-12-31 --force
 ```
 
-El summary de exportación informa recuentos de archivos de cuerpo. `written` cuenta archivos Markdown/TXT cuyos bytes finales cambiaron, y `skipped_unchanged` cuenta archivos Markdown/TXT sin cambios. Los manifest se actualizan cuando hace falta, pero no se incluyen en esos dos recuentos.
-
-Las exportaciones CLI y Web usan por defecto la ruta actual efectiva y solo mensajes visibles. Usa explícitamente `--path all` y/o `--include-internal` para incluir ramas o mensajes internos; el manifest registra ambas opciones. La CLI lee nodos en lotes acotados, mientras que la descarga Web y `Copiar conversación de la ruta actual` usan streams de texto dedicados y acotados en el servidor. El texto canónico completo y el texto legacy/raw recuperable no dependen del presupuesto de respuesta del reader.
-
 Reconstruye los índices opcionales de búsqueda Web:
 
 ```bash
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 ```
-
-`web-index` normaliza mensajes y títulos por etapas explícitas y crea trigram cuando está disponible. Cada build usa nombres staging impredecibles y un lease persistente con owner token; un segundo build se rechaza con `web_index_build_in_progress` y la limpieza stale también valida la propiedad exacta. Todas las etapas usan keyset acotado, presupuestos separados para input, normalización, derivados y FTS bind, y reportan picos reales. El writer lock se libera entre lotes. Solo la publicación final usa una transacción `BEGIN IMMEDIATE` corta para volver a comprobar canonical generations, propiedad de objetos y metadata antes de publicar atómicamente. Hasta entonces los readers ven el índice anterior. Un cambio de generation, interrupción, error de disco o cancelación conserva el índice anterior y limpia solo los objetos de ese lease. `POST /api/import/jobs/{job_id}/web-index/cancel` solo se aplica a la etapa index del import job.
 
 Arranca la Web UI:
 
@@ -207,57 +186,29 @@ El comando recomendado para archivos grandes es:
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --no-input-sha256 --rebuild-fts
 ```
 
-La entrada puede ser un ZIP, un `conversations.json` suelto o un directorio extraído que contenga `conversations.json` o archivos sharded `conversations-*.json`. Scanner discovery ignora macOS metadata paths como `__MACOSX`, archivos AppleDouble `._*` y `.DS_Store`, por lo que esos artifact locales no se convierten en conversation source.
-
-Para entradas de directorio, las plataformas POSIX usan `dir_fd` y `O_NOFOLLOW` componente por componente cuando están disponibles. El fallback portable rechaza componentes symlink/reparse y verifica containment inmediatamente antes de abrir por ruta, pero la biblioteca estándar de Python no puede eliminar todas las carreras de reemplazo local en cada plataforma. No importes un directorio extraído que un usuario local no confiable o un proceso concurrente pueda modificar; usa el ZIP original de solo lectura para ese modelo de amenaza.
-
 Si quieres que SQLite dedique tiempo adicional a ordenar estadísticas del planner y el índice FTS después de importar, usa:
 
 ```bash
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --no-input-sha256 --rebuild-fts --optimize-after-import --optimize-fts-after-import
 ```
 
-`--delete-input-on-success` está desactivado y actualmente no está soportado en ninguna plataforma. Si se solicita, falla antes de staging/import con `delete_input_secure_identity_unsupported` y nunca degrada a un unlink con carrera.
+`--delete-input-on-success` se conserva por compatibilidad, pero no está disponible y falla antes de importar. Las importaciones normales no borran el ZIP original; elimínalo tú solo después de verificar la base de datos.
 
 ```bash
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --no-input-sha256 --rebuild-fts --delete-input-on-success
 ```
 
-Las importaciones incrementales son una ruta normal de uso. Al importar un export más reciente en la misma base de datos, se actualizan las conversaciones cambiadas y se conserva el resto del archivo.
-
 ## Flujo de la Web UI
 
-La Web UI es una aplicación React local servida por FastAPI. La ruta recomendada es servir los archivos preconstruidos de `webui/dist` incluidos en el árbol runnable.
+Inicia la Web UI local con el comando siguiente. Puede abrir una base de datos existente o arrancar sin ella e importar un ZIP desde el navegador. El lector ofrece diseños chat y clásico paginados, búsqueda, controles de mensajes internos, copia y descarga.
 
 ```bash
 python chatgpt_archive.py web --port 8787
 ```
 
-El diseño de lectura por defecto es `chat`: los mensajes user se alinean a la derecha, los mensajes assistant a la izquierda y los mensajes system/internal aparecen como notas plegadas. Para usar el diseño técnico anterior por filas, elige `Classic` en Settings o añade `?layout=classic` o `?messageLayout=classic` a la URL de la Web UI.
-
-Todas las rutas comparten la misma regla effective-current para `path=current`: un `current_node` válido que pertenece a la conversación y su cadena de padres tiene prioridad incluso si todos los raw flags son cero; después se elige de forma determinista una cadena hoja utilizable con `is_on_current_path=1`; solo si ninguna existe esa conversación cae a all. La respuesta conserva el significado raw e incluye `current_node_exists`, `current_collection_source`, `current_path_fallback_to_all`, `effective_path` y visibilidad efectiva por nodo. Padres rotos y ciclos terminan con diagnósticos deterministas.
-
-Copiar y exportar respetan la visibilidad del reader. `Copiar conversación de la ruta actual` usa un stream completo con límites para la ruta actual del reader. `Copiar visibles` envía solo los ID visibles ya cargados y el servidor los transmite desde un único snapshot SQLite, sin mezclar contenido anterior y posterior a una escritura. Las descargas usan el mismo path y Show internal; el acceso raw es una vista previa raw ampliada con límite y una respuesta truncada muestra `raw_text` como texto plano.
-
-Cuando el reader salta a un hit con `around_node_id`, usa la misma colección paginada que el reader: visible-only rows si Show internal está desactivado, la node collection completa si Show internal está activado y la effective all-node collection para conversaciones dañadas sin current-path node.
-
-La Web UI puede usarse de dos formas. Si la base de datos ya existe, pásala de forma explícita o usa la ruta por defecto. Si no existe, arranca la Web UI igualmente y usa el panel de importación para subir un ZIP de ChatGPT. Las importaciones subidas se serializan para que solo haya un writer SQLite en el proceso.
-
-Tras una importación Web correcta, el backend ejecuta el mismo import pipeline que la CLI y luego ejecuta `verify`, `stats` y `web-index`. El ZIP subido es una copia temporal del lado del servidor y se limpia de forma independiente del archivo original en tu disco.
-
-Los fallos preflight y los trabajos terminales pueden devolver varios `cleanup_warnings`. La React UI muestra cada warning code seguro y cada `path_kind` con texto localizado, y conserva el fallback obsoleto `cleanup_warning`. No muestra rutas temporales, nombres de archivo, mensajes del SO ni detalles de clases de error; cada polling reemplaza el snapshot del mismo trabajo en vez de añadir avisos duplicados.
-
-Si no puede servirse la app React preconstruida, el fallback HTML es una interfaz de emergencia deliberadamente limitada, no un sustituto del reader completo. Tiene menos controles y las descargas excluyen nodos internal salvo petición explícita. Reconstruye `webui/dist` para la UI completa.
-
 ## Límites de seguridad de subida Web
 
-Las subidas Web aplican límites de seguridad a nivel de aplicación antes de iniciar el job de importación. Estos se controlan mediante variables de entorno y son independientes del `import` de CLI (que no usa estos límites).
-
-La subida Web reserva un pending slot antes de leer el archivo para que una subida grande no compita con otro writer. Cualquier error posterior a esa reserva, incluida una falla al crear la ruta temporal de subida, debe liberar el slot y limpiar el directorio temporal del servidor; un import job iniciado correctamente toma posesión del slot y de la copia temporal.
-
-Un kill del proceso, OOM o fallo del host puede omitir la limpieza normal y dejar un directorio antiguo `chatgpt-archive-upload-*` en el directorio temporal del sistema operativo. Esta versión no los elimina automáticamente porque un error de ownership/age podría borrar datos ajenos. Con el servidor detenido, un administrador solo puede borrar individualmente un directorio antiguo tras comprobar el prefijo exacto, la propiedad de la cuenta actual, su antigüedad, la ausencia de symlinks/reparse points y que ningún job lo use; nunca debe borrar el ZIP exportado por el usuario ni usar un wildcard sin verificar.
-
-Cuando la Web UI está enlazada a una dirección loopback (`127.0.0.1`, `localhost`, `::1`), los valores por defecto permiten archivos grandes de confianza:
+Las subidas del navegador se comprueban antes de importar. El loopback usa los valores locales grandes de la tabla. El acceso no loopback debe habilitarse expresamente y usa valores seguros menores salvo que elijas el perfil local de confianza. CLI `import` no está sujeto a estos límites.
 
 | Variable de entorno | Valor local por defecto | Controla |
 |---|---|---|
@@ -268,10 +219,6 @@ Cuando la Web UI está enlazada a una dirección loopback (`127.0.0.1`, `localho
 | `CHATGPT_ARCHIVE_MAX_UPLOAD_COMPRESSION_RATIO` | 1,000.0 | Ratio máx. de compresión para miembros JSON grandes |
 | `CHATGPT_ARCHIVE_MAX_UPLOAD_TOTAL_MEMBERS` | 100,000 | Número máx. total de miembros ZIP |
 | `CHATGPT_ARCHIVE_REMOTE_UPLOAD_PROFILE` | unset | Ponlo en `local` solo en redes no loopback de confianza para usar valores locales por defecto en límites no definidos |
-
-**Política de enlace remoto.** Un bind no loopback requiere `CHATGPT_ARCHIVE_ALLOW_REMOTE_ACCESS=true`, `CHATGPT_ARCHIVE_ALLOW_REMOTE_UPLOADS=true` o `CHATGPT_ARCHIVE_REMOTE_UPLOAD_PROFILE=local` como opt-in. Los valores remote-safe son 128 MiB ZIP, 256 MiB por JSON member, 512 MiB total sin comprimir, ratio 200.0, 200 JSON members y 10,000 ZIP members; el ratio loopback/local es 1000.0. `ALLOW_REMOTE_UPLOADS` solo relaja límites explícitos y los demás siguen remote-safe. `REMOTE_UPLOAD_PROFILE=local` restaura todos los límites no definidos a sus valores locales grandes y solo debe usarse en una LAN de confianza.
-
-`/api/schema` informa la política efectiva. Todas las cargas requieren un `Content-Length` válido. Antes del primer byte recibido se comprueba el filesystem temporal del parser multipart; tras el parseo se comprueban por separado el directorio de carga y el filesystem de la DB, que pueden ser discos distintos. Reserva espacio para spool, ZIP del servidor, DB, WAL/TEMP e índices.
 
 Para aumentar un límite local para un archivo legítimo grande, define la variable correspondiente antes de iniciar la Web UI:
 
@@ -324,15 +271,11 @@ export CHATGPT_ARCHIVE_REMOTE_UPLOAD_PROFILE=local
 python chatgpt_archive.py web --host 0.0.0.0 --port 8787
 ```
 
-Define límites más altos solo para archivos locales de confianza. Valores más altos aumentan el riesgo de ZIP bomb, presión de disco y uso de CPU/memoria.
-
 ## Sintaxis de búsqueda
 
-La búsqueda CLI usa sintaxis segura. Los términos normales son substring `contains` normalizado y usan AND; `OR` en mayúsculas crea alternativas. Las comillas conservan frases y `-term`/`-"frase"` excluyen. `word` aplica límites solo a letras ASCII, números y guion bajo; CJK conserva prudentemente `normalized contains`. Los modificadores raw `path:`/`scope:` de la consulta prevalecen sobre los selectores UI.
+La búsqueda admite términos simples, frases entre comillas, `OR` en mayúsculas, exclusiones como `-term` y filtros como `role:user`, `source:zip`, `path:current`, `path:all`, `scope:title` y `scope:message`. Las consultas son texto de búsqueda, no SQL directo.
 
-Las exclusiones son de nivel conversación para resultados de conversaciones: si cualquier título o mensaje dentro del scope y path de búsqueda seleccionados coincide con un fragmento excluido, esa conversation no se devuelve. `/api/search/messages` sigue devolviendo solo hits de mensajes que no contienen el fragmento excluido. `path:current` sigue la ruta del reader por conversación; si un archivo dañado no tiene ningún current-path node, la búsqueda current-path cae al mismo all-node view que muestra el reader.
-
-Los filtros de fecha usan días UTC: inicio inclusivo a `00:00:00Z` y fin exclusivo a `00:00:00Z` del día siguiente. Los timestamps y fechas deterministas de nombres exportados por CLI usan UTC; el navegador muestra su zona local. La búsqueda Web admite 500 caracteres. Cmd/Ctrl+F solo ve filas renderizadas de la lista virtual; usa búsqueda del archivo o copia la conversación completa.
+Los filtros y rangos de fecha usan días UTC. Cmd/Ctrl+F solo ve las filas renderizadas; para contenido no cargado usa la búsqueda del archivo o copia la conversación.
 
 ```bash
 python chatgpt_archive.py search --db archive/chatgpt_archive.db "python sqlite"
@@ -346,32 +289,24 @@ La búsqueda Web usa índices opcionales normalized trigram creados por `web-ind
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 ```
 
-Los diagnostics de búsqueda son pistas de rendimiento best-effort. Solo deben informar capas candidatas normalized-safe o fallbacks de escaneo como normalized trigram, normalized scan, normalized title scan o full scan. La presencia de legacy raw FTS puede informarse por separado, pero no debe presentarse como el candidate backend real porque puede omitir texto equivalente tras normalización.
-
-Si ejecutas manualmente `VACUUM`, `VACUUM INTO` o reescribes la base SQLite con una herramienta externa de compactación o backup, vuelve a ejecutar `python chatgpt_archive.py web-index --db <archive.db>` antes de confiar en la búsqueda de la Web UI. El índice Web opcional se reconstruye desde las tablas canónicas de conversaciones y es seguro regenerarlo.
-
 ## Verificación e índices Web opcionales
 
-`verify` revisa la integridad de SQLite y la coherencia propia del proyecto, incluidos current nodes faltantes, enlaces de padres rotos, conversaciones vacías y ciclos de padres.
+Ejecuta `verify` después de importar para comprobar SQLite y los enlaces de las conversaciones.
 
 ```bash
 python chatgpt_archive.py verify --db archive/chatgpt_archive.db
 ```
 
-`message_fts_rebuildable` es una capacidad runtime real, no una constante: si falta FTS pero FTS5 está disponible informa `missing` y rebuildable true; sin módulo FTS5 informa `capability_unavailable` y false; una tabla dañada informa `damaged`, y la reconstrucción depende del mismo probe runtime acotado. Los demás errores SQLite se propagan al clasificador estructurado de base de datos.
-
-Si `PRAGMA integrity_check` informa de un inverted index FTS5 malformado en `web_message_trigram` o `web_title_trigram`, los datos principales de conversación pueden seguir siendo estructuralmente válidos mientras que el índice opcional de búsqueda Web está dañado. En ese caso `verify` informa `optional_web_index_error true` y muestra una pista de recuperación. Reconstruye los índices Web opcionales con:
+Los índices FTS de CLI y de subcadenas Web son opcionales. Si `verify` informa de un error en un índice Web opcional, reconstrúyelo y vuelve a verificar:
 
 ```bash
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 python chatgpt_archive.py verify --db archive/chatgpt_archive.db
 ```
 
-El diagnóstico es conservador. Solo se marca como problema opcional de índice Web cuando todos los errores de integrity-check pueden atribuirse a esas tablas opcionales o a sus FTS5 shadow tables.
-
 ## Logging
 
-Los niveles de log son `debug`, `info`, `warning`, `error` y `none`. El nivel por defecto es `warning`. Los niveles más detallados incluyen los niveles más silenciosos. Los logs no incluyen títulos, snippets, raw JSON ni cuerpos de mensajes.
+Los niveles de log son `debug`, `info`, `warning`, `error` y `none`; el predeterminado es `warning`. Los logs contienen estados y recuentos, no títulos, mensajes, fragmentos ni JSON sin procesar.
 
 Las opciones de logging pueden ir antes o después del subcomando:
 
@@ -382,11 +317,9 @@ python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_Z
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --json-logs --log-file logs/import.jsonl
 ```
 
-Mantén los logs JSON en ubicaciones ignoradas como `logs/`. Los archivos `*.jsonl` son artefactos locales de log y delivery clean los rechaza.
-
 ## Construir desde las fuentes
 
-Ejecuta las comprobaciones de Python y limpia artefactos seguros antes del primer delivery clean:
+Estos comandos ejecutan las comprobaciones del proyecto, construyen la Web UI, eliminan archivos generados y comprueban una entrega ejecutable.
 
 ```bash
 python -m compileall chatgpt_archive.py chatgpt_export_archiver tests tools
@@ -409,10 +342,6 @@ python tools/clean_generated_artifacts.py --fail-on-blocked
 python tools/check_delivery_clean.py --mode runnable .
 ```
 
-`clean_generated_artifacts.py` es multiplataforma y conserva `webui/dist`. Solo elimina archivos que se pueden regenerar con seguridad. No elimina bases de datos, ZIP, sidecars de SQLite, `archive/`, `exports/` ni `logs/`; si delivery clean sigue informando esas rutas sensibles, muévelas fuera de la raíz del proyecto o elimínalas manualmente. Los comandos de aceptación usan `--fail-on-blocked`, de modo que los restos sensibles detienen el flujo de entrega inmediatamente.
-
-En Windows PowerShell o cmd, usa comillas dobles para las search queries que contienen espacios, por ejemplo `"python sqlite"` o `"role:user path:current python -pandas"`. Los comandos de Python, Web, Web index, typecheck, build, cleanup y delivery-check anteriores funcionan en macOS, Windows y Linux cuando Python y Node están en el `PATH`. Si Windows usa el Python launcher, ejecuta el helper de limpieza con `py -3 tools/clean_generated_artifacts.py --fail-on-blocked`.
-
 Para comprobar un ZIP de entrega:
 
 ```bash
@@ -421,17 +350,11 @@ python tools/check_delivery_clean.py --mode runnable path/to/delivery.zip
 
 ## Contenido del paquete
 
-Una entrega runnable debe incluir las fuentes Python, tests, documentación, `requirements-web.txt`, `constraints-web-py312.txt`, el código fuente y tests frontend bajo `webui/src`, `webui/tests` y `webui/scripts`, los archivos de configuración/package frontend y los assets construidos bajo `webui/dist`. No debe incluir `webui/node_modules`, `webui/tsconfig.tsbuildinfo`, directorios de caché o bytecode de Python, cachés de coverage/typecheck, `.DS_Store`, archivos AppleDouble `._*`, `__MACOSX`, `Thumbs.db`, `Desktop.ini`, `.gitignore.md`, logs temporales, logs locales de aceptación, `*.log`, `*.ndjson`, `*.jsonl`, `archive/`, `exports/`, ningún `*.zip`, `conversations*.json`, bases de datos reales como `*.db`, `*.sqlite` y `*.sqlite3`, ni sidecars de SQLite como `*.db-journal`, `*.sqlite-wal`, `*.sqlite-shm`, `*.sqlite-journal`, `*.sqlite3-wal`, `*.sqlite3-shm` y `*.sqlite3-journal`. La comprobación de directorio permite el `.git` propio de la raíz objetivo para que un Git clone normal pueda verificarse, pero rechaza `.git` anidados; en un ZIP de entrega cualquier entrada `.git` falla.
-
-Una entrega source-only puede omitir `webui/dist`, pero entonces habrá que reconstruir el frontend antes de servir la React UI completa.
+Un paquete ejecutable incluye el código Python, las pruebas, la documentación, las dependencias y el código Web y los recursos construidos de `webui/dist`. Mantén fuera las bases de datos, exportaciones, ZIP, logs, cachés, `node_modules` y otros datos locales.
 
 ## Resumen de la base de datos
 
-La base principal almacena conversaciones, mapping nodes, import runs y warnings. Solo los objetos message conservan el objeto JSON raw del mensaje; conversation y mapping-node se normalizan, no se guardan byte por byte. El SHA-256 del ZIP de entrada es opcional y las columnas SHA por entry de `source_files`/`file_index` están reservadas y sin rellenar. La tabla FTS de CLI es `message_fts`. Las tablas auxiliares opcionales para búsqueda Web incluyen `web_message_norm`, `web_title_norm`, `web_message_trigram` y `web_title_trigram`, además de las shadow tables de SQLite FTS5.
-
-La base canónica usa `PRAGMA user_version` 6; las entradas read-only devuelven `database_migration_required` para una base antigua. Migration calcula capacidad por predecessor step: rewrite/backfill reserva espacio de rewrite y journal, mientras el paso v5 de metadata/query generation no finge reescribir todos los nodes. Dentro de `BEGIN IMMEDIATE` vuelve a comprobar size, rows, sidecars, pasos y espacio antes de mutar. El compatibility scan es exacto, por lotes y cancelable. Cancelación, ENOSPC o error SQLite revierten todo; una base current limpia es un true no-op.
-
-Health y `verify` distinguen entre `message_fts` opcional ausente y dañado. El daño informa `optional_message_fts_error` con una indicación `--rebuild-fts`; los fallos generales malformed, locked, readonly, I/O y SQL runtime no se ocultan como capacidad ausente y usan `database_malformed`, `database_locked`, `database_readonly`, `database_io_error` o `database_runtime_failure`.
+SQLite guarda conversaciones, mensajes, historial de importaciones, avisos e índices de búsqueda opcionales. Si aparece `database_migration_required`, haz una copia de seguridad y ejecuta `python chatgpt_archive.py migrate --db archive/chatgpt_archive.db`.
 
 ## Límites conocidos
 
@@ -441,38 +364,6 @@ Health y `verify` distinguen entre `message_fts` opcional ausente y dañado. El 
 - Las partes de nombres de archivo exportados se sanean para Windows y sistemas tipo Unix, incluidos nombres reservados de dispositivo como `CON`, `AUX`, `COM1`, `LPT9`, `COM¹` y `LPT²`, además de puntos y espacios finales.
 - Los archivos muy grandes pueden tardar en importarse, reconstruir FTS y crear índices Web trigram. Para importaciones grandes, prefiere la ruta `--rebuild-fts`.
 
-## Contratos de seguridad y respuesta
+## Notas de seguridad
 
-La entrada de carga acepta un solo valor para `Origin`, `Content-Length` y `Sec-Fetch-Site`. Origin debe ser un único origen HTTP(S) sin credenciales, ruta, consulta, fragmento, controles ni cadenas separadas por comas; Content-Length debe ser un entero decimal ASCII no negativo en forma canónica. Los encabezados duplicados o mal formados se rechazan antes de analizar multipart, y una configuración de ratio inválida o no finita vuelve al valor seguro y finito del perfil.
-
-Todas las solicitudes validan Host; un bind no loopback requiere `CHATGPT_ARCHIVE_ALLOWED_HOSTS` o CLI `--allowed-hosts` y rechaza `*`. Los proxies usan un contrato single-edge y se configuran con `CHATGPT_ARCHIVE_TRUSTED_PROXIES` o `--trusted-proxies`. Las escrituras remotas exigen `Origin` de mismo origen. Fetch Metadata duplicado o inválido se rechaza, y los reads API salvo `/api/health` superficial rechazan `Sec-Fetch-Site: cross-site`. La UI estática, navegación `none` y clientes CLI sin ese header siguen compatibles.
-
-Los fallos incluyen una etapa source-read y códigos estables `upload_preflight_failed`, `input_source_open_failed`, `input_source_not_regular_file`, `source_read_failed`, `source_changed_during_read`, `invalid_conversation_encoding` y `json_integer_too_large`. La limpieza usa `cleanup_warnings` estructurado; `cleanup_warning` conserva solo el primer elemento por compatibilidad.
-
-La carga comprueba antes de recibir el filesystem de spool y, tras parsear, los filesystems del ZIP y la DB. Import, migration e índice Web también hacen preflight con reserva. ENOSPC devuelve un código estable `*_disk_space_insufficient`; la transacción revierte y el índice publicado sigue legible.
-
-JSON, directorios y ZIP usan el mismo parser híbrido acotado y una transacción. Un elemento completo normal suele decodificarse una vez; uno incierto o repartido puede hacer primero un único fast probe fallido y acotado, y después usa el framer léxico persistente sin volver a decodificar prefijos crecientes.
-
-La identidad se valida con stat/hash/read ligados al descriptor. Strict delete se rechaza antes de staging y recovery solo procesa journals históricos propios. Migration solo acepta predecesores conocidos con definición exacta.
-
-Los JSON no estándar `NaN`/`Infinity`, incluidos números estándar desbordados como `1e9999`, se rechazan; los timestamps inválidos se guardan como `NULL` con un warning sin contenido. La API de mensajes devuelve un único `display_text` limitado por el presupuesto del reader y usa metadata de truncamiento/total-exactness para indicar si puede recuperarse completo, sin duplicar `content_text`/`render_text`. Las lecturas CLI/Web ordinarias y `/api/health` por defecto usan un schema gate acotado y no ejecutan `foreign_key_check`; `verify` y `/api/health?deep=true` realizan la comprobación exacta completa con campos de freshness. Cada lectura lógica CLI/Web de varias sentencias inicia un único snapshot SQLite antes de los probes de schema/capability y lo libera al terminar o fallar el stream. Se conservan las semánticas effective-current, pagination y around-node.
-
-“Copiar URL” siempre serializa `match_mode`, `layout`, `show_internal` y el estado compartible de búsqueda/lector. Los valores explícitos de URL tienen prioridad sobre `localStorage`; solo los ausentes usan ajustes locales. Esta versión usa `replaceState` y no restaura el historial paso a paso de búsquedas o selecciones con Atrás/Adelante.
-
-JSON rechaza `NaN`/`Infinity` y desbordamientos como `1e9999`. Un timestamp inválido se guarda como `NULL` con warning que contiene solo campo y tipo. Las lecturas CLI/Web ordinarias y `/api/health` por defecto usan una puerta de schema acotada y no ejecutan `foreign_key_check`; `verify` y `/api/health?deep=true` procesan en stream la comprobación completa. El total es exacto, la sample en memoria está acotada y los campos de modo, tiempo de terminación, generation y stale declaran el contrato; el coste de CPU/VM crece con la base. Los contadores effective-current mantienen sus unidades documentadas.
-
-El texto largo usa un cursor opaco ligado a la revisión y lecturas incrementales BLOB de SQLite; el offset numérico de compatibilidad se limita a 1.048.576 caracteres y después se exige el cursor. Raw preview usa una consulta BLOB acotada segura para NUL e informa tamaño en bytes y si es exacto. NUL visibles y surrogates aislados se representan siempre como U+FFFD, mientras el raw JSON sigue escapado. Los escalares de resultados tienen presupuestos explícitos y metadata de truncamiento/longitud; los ID no se truncan.
-
-La exportación CLI/Web rechaza antes de materializar más de 100.000 nodos, 32 MiB de entrada canonical/raw en un nodo o 128 MiB por conversación; la salida en stream se limita a 256 MiB. Effective-current usa el mismo límite online de 100.000 nodos y 128 MiB de entrada de ID de grafo por conversación. CLI escribe un temporal en el directorio destino mientras calcula hash y compara el archivo anterior en stream, y solo reemplaza atómicamente contenido distinto. La copia del navegador usa `ReadableStream` y, antes de tocar el portapapeles, aborta sobre 16 MiB UTF-8 u 8 Mi caracteres y recomienda Descargar; nunca copia texto parcial.
-
-La exportación completa escanea conversations una vez hacia un plan SQLite temporal en el directorio de salida, asigna nombres seguros en disco y transmite hashes y manifests JSONL/CSV. Rechaza más de 1.000.000 conversations, 1 GiB de metadata del plan o 2 GiB por manifest. Effective-current global limita 100.000 conversations, 1.000.000 nodes, 512 MiB de grafo y 1 GiB temporal estimado, con batches de 20.000 filas/nodes y 64 MiB.
-
-Una página de message search siempre incluye `total_exact`; al terminar el scan puede ser true incluso con `count_total=false`. `order_exact`, `scan_complete` y `provisional_order` describen orden/scan por separado; con continuation, `next_offset=null`, y conversation search usa el mismo contrato. El classifier placeholder en stream mantiene reader/search/index/copy/export coherentes con cualquier whitespace inicial.
-
-Los filtros o exclusiones sin término pueden filtrar conversations, pero message hit, reader highlight y navegación requieren un término positivo de texto. Copiar URL usa un único contexto search/list/selection ya aplicado y no mezcla texto pendiente de debounce. Japonés y español se etiquetan claramente como traducciones parciales. El release valida antes una lista autoritativa de archivos requeridos independiente del collector; si falta source/config/doc, falla sin reemplazar el ZIP anterior.
-
-La validación devuelve como máximo 16 elementos seguros con solo `location`, `field` y `code` público estable. La verificación exacta de candidatos, snippets tardíos, enrichment y respuesta serializada están acotados. Agotar el presupuesto en candidatos posteriores no descarta hits confirmados: la respuesta marca partial/pending y ofrece continuation ligado cuando puede reanudar. Un candidato que supera el límite duro por fila queda pending, no se convierte en false-exact miss. El índice Web mide bytes leídos, normalizados y enlazados a FTS. El release calcula hash, escribe y verifica por chunks.
-
-Python `zipfile` y el pipeline de importación admiten estructuras ZIP64, con una regresión de member ZIP64 forzado pequeño; la aceptación habitual no genera un ZIP físico superior a 4 GiB. Siguen aplicándose todos los límites de members, bytes, ratio de compresión, disco y CPU.
-
-Una exportación CLI/Web larga mantiene deliberadamente un único SQLite read snapshot hasta terminar, fallar o desconectarse el cliente. En modo WAL, un reader largo puede retrasar el checkpoint y permitir que el WAL crezca con writers concurrentes; duración, CPU/VM, WAL y disco temporal siguen siendo proporcionales a los datos elegidos. No se debe romper la consistencia del snapshot para adelantar el checkpoint.
+Las importaciones, subidas, búsquedas, copias, exportaciones y escrituras usan entradas acotadas y errores seguros sin contenido. Mantén la Web UI en loopback salvo que confíes en la red, conserva los ZIP originales hasta completar la verificación y deja espacio suficiente para la base, archivos temporales, WAL e índices.

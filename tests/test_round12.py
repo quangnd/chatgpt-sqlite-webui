@@ -421,12 +421,24 @@ class Round12Regressions(unittest.TestCase):
                 "m.release_pending_upload_slot()"
             )
             child = subprocess.Popen(
-                [sys.executable, "-c", child_code, str(database)],
+                [
+                    sys.executable,
+                    "-W",
+                    "error::ResourceWarning",
+                    "-c",
+                    child_code,
+                    str(database),
+                ],
                 cwd=Path(__file__).resolve().parents[1],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env={
+                    key: value
+                    for key, value in os.environ.items()
+                    if key != "PYTHONTRACEMALLOC"
+                },
             )
             try:
                 self.assertEqual(child.stdout.readline().strip(), "ready")
@@ -666,8 +678,32 @@ class Round12Regressions(unittest.TestCase):
             env=child_env,
         )
         payload = json.loads(harness.stdout)
+        self.assertEqual(payload["schema"], "chatgpt-sqlite-webui-real-pipeline-v3")
         self.assertEqual(payload["aggregate"]["successful_runs"], 1)
         self.assertTrue(payload["samples"][0]["cleanup"]["complete"])
+        sample = payload["samples"][0]
+        self.assertEqual(
+            sample["timing_semantics"]["formal_threshold"],
+            "required_pipeline_wall_seconds",
+        )
+        self.assertGreaterEqual(
+            sample["pipeline_wall_seconds"], sample["job"]["elapsed_seconds"]
+        )
+        self.assertGreaterEqual(
+            sample["required_pipeline_wall_seconds"],
+            sample["workload_wall_seconds"],
+        )
+        self.assertGreaterEqual(
+            sample["external_process_wall_seconds"],
+            sample["required_pipeline_wall_seconds"],
+        )
+        self.assertIn("upload", sample["resource_sampler"]["observed_stages"])
+        self.assertIn("required_cleanup", sample["resource_sampler"]["observed_stages"])
+        self.assertTrue(sample["resource_sampler"]["coverage_complete"])
+        self.assertFalse(sample["resource_sampler"]["sampler_cleanup_failed"])
+        self.assertIsNone(
+            sample["resource_sampler"]["sqlite_unlinked_temp_bytes"]
+        )
 
         for extra_args, expected_error in (
             (["--max-job-seconds", "0"], None),
@@ -696,6 +732,54 @@ class Round12Regressions(unittest.TestCase):
                     expected_error,
                 )
 
+        slow_cleanup = subprocess.run(
+            [
+                sys.executable,
+                str(root / "tools" / "acceptance_real_pipeline.py"),
+                "--self-test-cleanup-delay-seconds",
+                "1.2",
+                "--max-pipeline-seconds",
+                "1",
+                "--python",
+                sys.executable,
+            ],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=child_env,
+        )
+        self.assertNotEqual(slow_cleanup.returncode, 0)
+        slow_sample = json.loads(slow_cleanup.stdout)["samples"][0]
+        self.assertTrue(slow_sample["correctness_pass"])
+        self.assertFalse(slow_sample["performance_pass"])
+        self.assertLess(slow_sample["workload_wall_seconds"], 1.0)
+        self.assertGreater(slow_sample["required_pipeline_wall_seconds"], 1.0)
+
+        hard_timeout = subprocess.run(
+            [
+                sys.executable,
+                str(root / "tools" / "acceptance_real_pipeline.py"),
+                "--self-test",
+                "--hard-run-seconds",
+                "0.05",
+                "--python",
+                sys.executable,
+            ],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=child_env,
+        )
+        self.assertNotEqual(hard_timeout.returncode, 0)
+        hard_sample = json.loads(hard_timeout.stdout)["samples"][0]
+        self.assertTrue(hard_sample["hard_timeout"])
+        self.assertEqual(hard_sample["error_code"], "hard_timeout")
+        self.assertFalse(hard_sample["cleanup"]["complete"])
+        self.assertTrue(
+            hard_sample["cleanup"].get("deadline_exhausted_before_cleanup")
+        )
+        self.assertTrue(hard_sample["cleanup"]["remaining_path"])
+
         scale = subprocess.run(
             [
                 sys.executable,
@@ -718,6 +802,20 @@ class Round12Regressions(unittest.TestCase):
             scale_payload["aggregate"]["1000"]["performance_measurement_mode"],
             "fresh_subprocess_without_tracemalloc",
         )
+        performance_sample = next(
+            item for item in scale_payload["samples"]
+            if item["measurement_mode"] == "performance"
+        )
+        diagnostic_sample = next(
+            item for item in scale_payload["samples"]
+            if item["measurement_mode"] == "allocation_diagnostic"
+        )
+        self.assertFalse(
+            performance_sample["tracemalloc_active_during_measurement"]
+        )
+        self.assertTrue(
+            diagnostic_sample["tracemalloc_active_during_measurement"]
+        )
         self.assertTrue(
             scale_payload["resource_stress_fixture_self_test"]
             ["invalid_elements_are_not_valid_data"]
@@ -728,6 +826,12 @@ class Round12Regressions(unittest.TestCase):
         self.assertEqual(len(representative["runs"]), 2)
         self.assertTrue(all(run["verify_ok"] for run in representative["runs"]))
         self.assertTrue(all(run["web_index_complete"] for run in representative["runs"]))
+        self.assertTrue(representative["ratio_contract"]["passing_profiles"])
+        self.assertTrue(all(
+            "retained_canonical_payload_bytes" in run
+            and "indexed_source_bytes" in run
+            for run in representative["runs"]
+        ))
         hash_lock = subprocess.run(
             [
                 sys.executable,

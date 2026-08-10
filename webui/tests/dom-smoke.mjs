@@ -87,10 +87,12 @@ function assertStaticFrontendContracts() {
   assert.equal(paneSource.includes("while (items.length < MAX_NAVIGABLE_HIT_MESSAGES)"), false, "reader hit navigation must not serially prefetch ten pages on initial load");
   assert.ok(paneSource.includes("HIT_PREFETCH_THRESHOLD"), "reader hit navigation should lazily append near the loaded boundary");
   assert.ok(messageBlockSource.includes("getMessageDisplayChunk"), "truncated reader messages should have an explicit bounded expansion path");
-  assert.ok(messageBlockSource.includes("chunk.resolver_input_truncated || (!chunk.has_more && !chunk.total_chars_exact)"), "single-message expansion/copy must distinguish normal intermediate chunks from terminal incomplete raw recovery");
+  assert.ok(messageBlockSource.includes("displayChunkIsComplete"), "single-message copy must require explicit terminal and exact completion evidence");
+  assert.ok(messageBlockSource.includes("displayChunkCanContinue"), "single-message copy must reject has_more states that cannot make forward progress");
   assert.ok(paneSource.includes("getVisibleMessagesCopyText"), "Copy visible must bind loaded message IDs to one server snapshot");
   assert.ok(paneSource.includes("MAX_VISIBLE_COPY_SELECTION"), "visible copy must cap the server selection contract locally");
-  assert.ok(paneSource.includes("nodeIds.length > MAX_VISIBLE_COPY_SELECTION"), "an oversized visible selection must be rejected before the request");
+  assert.ok(paneSource.includes("copyableVisibleNodeIds.length > MAX_VISIBLE_COPY_SELECTION"), "an oversized visible selection must be rejected before the request");
+  assert.ok(paneSource.includes("copyableVisibleNodeIds.length === 0"), "Copy visible must be disabled when no loaded message can be copied");
   assert.ok(messageBlockSource.includes("message.display_text_resolver_input_truncated"), "initial reader metadata must expose resolver incompleteness separately from unknown total length");
   assert.ok(i18nSource.includes("displayRecoveryIncomplete"), "incomplete raw recovery should have an accessible localized warning");
   assert.ok(messageBlockSource.includes("JSON.stringify([conversationId, message.node_id"), "message state keys should use collision-free tuple serialization");
@@ -314,6 +316,12 @@ function makeSyntheticConversations() {
     tool: node("tool", "root", "tool/system", "Synthetic tool-system internal text.", 1_956_000_001),
   };
   conversations.push(conversation("dom-role-class", "DOM Role Class Conversation", roleClassMapping, "tool", 1_956_000_000));
+
+  const internalOnlyMapping = {
+    root: root(["tool"]),
+    tool: node("tool", "root", "tool/system", "Synthetic hidden internal payload.", 1_956_100_001),
+  };
+  conversations.push(conversation("dom-internal-only", "DOM Internal Only Conversation", internalOnlyMapping, "tool", 1_956_100_000));
 
   const techJsonMapping = {
     root: root(["u"]),
@@ -1066,8 +1074,14 @@ async function main() {
       const url = new URL(response.url());
       return response.status() === 200 && url.pathname === "/api/conversations" && !url.searchParams.get("continuation");
     });
+    const listClearedObserved = page.waitForFunction(
+      () => document.querySelectorAll(".conversation-item").length === 0,
+      undefined,
+      { timeout: 20_000 },
+    );
     await page.getByRole("button", { name: "Load more", exact: true }).click();
     await listStaleObserved;
+    await listClearedObserved;
     await listRefreshObserved;
     await page.waitForFunction(() => document.querySelectorAll(".conversation-item").length >= 20 && !document.querySelector(".sidebar .error-box"), undefined, { timeout: 20_000 });
     assert.equal(listStaleResponses, 1, "stale conversation append should restart page zero once");
@@ -1593,6 +1607,23 @@ async function main() {
     const userBubble = await page.locator(".message-row-user .message").first().boundingBox();
     assert.ok(assistantBubble && userBubble && userBubble.x > assistantBubble.x, "chat layout should align user messages to the right of assistant messages");
 
+    let emptyVisibleCopyRequests = 0;
+    const emptyVisibleCopyListener = (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/by-id/copy-visible" && url.searchParams.get("conversation_id") === "dom-internal-only") {
+        emptyVisibleCopyRequests += 1;
+      }
+    };
+    page.on("request", emptyVisibleCopyListener);
+    await page.goto(`${baseUrl}?conversation=dom-internal-only`, { waitUntil: "networkidle" });
+    await page.getByRole("heading", { name: "DOM Internal Only Conversation" }).waitFor({ state: "visible", timeout: 20_000 });
+    const emptyVisibleCopyButton = page.getByRole("button", { name: "Copy visible" });
+    assert.equal(await emptyVisibleCopyButton.isDisabled(), true, "Copy visible must be disabled when the reader has no copyable message IDs");
+    await emptyVisibleCopyButton.evaluate((button) => button.click());
+    await page.waitForTimeout(100);
+    assert.equal(emptyVisibleCopyRequests, 0, "an empty visible selection must not be sent to the server");
+    page.off("request", emptyVisibleCopyListener);
+
     await page.goto(`${baseUrl}?conversation=dom-long-body`, { waitUntil: "networkidle" });
     await waitForCount(page, ".message", 1);
     const displayRequestsBeforeExpand = await page.evaluate(() => performance.getEntriesByType("resource").filter((entry) => {
@@ -1718,6 +1749,89 @@ async function main() {
     await page.getByText("The stored raw payload exceeded the safe recovery limit", { exact: false }).waitFor({ state: "visible", timeout: 20_000 });
     assert.equal(await page.evaluate(() => window.__copiedText), "incomplete-copy-sentinel", "single-message copy must not write an incomplete recovered body to the clipboard");
     await page.unroute("**/api/by-id/display?**", incompleteDisplayRoute);
+
+    let uncontinuableFirstRequests = 0;
+    const uncontinuableFirstRoute = async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("node_id") !== "long-body") {
+        await route.continue();
+        return;
+      }
+      uncontinuableFirstRequests += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          conversation_id: "dom-long-body",
+          node_id: "long-body",
+          display_text: "uncontinuable prefix",
+          offset: 0,
+          returned_chars: 20,
+          total_chars: 20,
+          total_chars_exact: false,
+          has_more: true,
+          next_offset: null,
+          next_cursor: null,
+          content_revision: "synthetic-uncontinuable-first",
+          max_chunk_chars: 65536,
+          resolver_input_truncated: false,
+          source: "canonical_placeholder",
+        }),
+      });
+    };
+    await page.route("**/api/by-id/display?**", uncontinuableFirstRoute);
+    await page.reload({ waitUntil: "networkidle" });
+    await waitForCount(page, ".message", 1);
+    await page.evaluate(() => { window.__copiedText = "uncontinuable-first-sentinel"; });
+    await page.locator('[data-node-id="long-body"]').getByRole("button", { name: "Copy", exact: true }).click();
+    await page.getByText("The stored raw payload exceeded the safe recovery limit", { exact: false }).waitFor({ state: "visible", timeout: 20_000 });
+    assert.equal(await page.evaluate(() => window.__copiedText), "uncontinuable-first-sentinel", "has_more without a continuation must not write its prefix to the clipboard");
+    assert.equal((await page.locator(".reader").textContent())?.includes("Copied"), false, "uncontinuable display recovery must not report Copied");
+    await page.locator('[data-node-id="long-body"]').getByRole("button", { name: "Copy", exact: true }).click();
+    await page.waitForTimeout(100);
+    assert.equal(uncontinuableFirstRequests, 1, "retrying a terminal incomplete display must not enter a request loop");
+    await page.unroute("**/api/by-id/display?**", uncontinuableFirstRoute);
+
+    let uncontinuableLaterRequests = 0;
+    const uncontinuableLaterRoute = async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("node_id") !== "long-body") {
+        await route.continue();
+        return;
+      }
+      uncontinuableLaterRequests += 1;
+      const offset = Number(url.searchParams.get("offset") || "0");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          conversation_id: "dom-long-body",
+          node_id: "long-body",
+          display_text: offset === 0 ? "first-part" : "terminal-prefix",
+          offset,
+          returned_chars: offset === 0 ? 10 : 15,
+          total_chars: offset === 0 ? 25 : 15,
+          total_chars_exact: false,
+          has_more: true,
+          next_offset: offset === 0 ? 10 : null,
+          next_cursor: offset === 0 ? "synthetic-next" : null,
+          content_revision: "synthetic-uncontinuable-later",
+          max_chunk_chars: 65536,
+          resolver_input_truncated: false,
+          source: offset === 0 ? "canonical" : "canonical_placeholder",
+        }),
+      });
+    };
+    await page.route("**/api/by-id/display?**", uncontinuableLaterRoute);
+    await page.reload({ waitUntil: "networkidle" });
+    await waitForCount(page, ".message", 1);
+    await page.evaluate(() => { window.__copiedText = "uncontinuable-later-sentinel"; });
+    await page.locator('[data-node-id="long-body"]').getByRole("button", { name: "Copy", exact: true }).click();
+    await page.getByText("The stored raw payload exceeded the safe recovery limit", { exact: false }).waitFor({ state: "visible", timeout: 20_000 });
+    assert.equal(uncontinuableLaterRequests, 2, "copy must stop when a later chunk has no forward continuation");
+    assert.equal(await page.evaluate(() => window.__copiedText), "uncontinuable-later-sentinel", "a later uncontinuable chunk must discard every accumulated prefix");
+    assert.equal((await page.locator(".reader").textContent())?.includes("Copied"), false, "a later uncontinuable chunk must not report Copied");
+    await page.unroute("**/api/by-id/display?**", uncontinuableLaterRoute);
 
     await page.goto(`${baseUrl}?conversation=dom-long&layout=classic`, { waitUntil: "networkidle" });
     await waitForCount(page, ".message", 1);

@@ -3,6 +3,7 @@ from __future__ import annotations
 """Synthetic effective-current scope/chain benchmark for release verification."""
 
 import argparse
+import json
 import sqlite3
 import sys
 import time
@@ -13,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from chatgpt_export_archiver.current_path import (
+    EffectiveCurrentResourceLimitError,
     ensure_effective_current_views,
     invalidate_effective_current_cache,
 )
@@ -32,7 +34,8 @@ def _elapsed(call) -> float:
     return time.perf_counter() - started
 
 
-def benchmark_scopes(conversation_count: int) -> None:
+def benchmark_scopes(conversation_count: int) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
     conn = _connection()
     try:
         conn.executemany(
@@ -53,17 +56,29 @@ def benchmark_scopes(conversation_count: int) -> None:
         )
         for label, ids in scopes:
             invalidate_effective_current_cache(conn)
-            seconds = _elapsed(lambda: ensure_effective_current_views(conn, ids))
+            try:
+                seconds = _elapsed(lambda: ensure_effective_current_views(conn, ids))
+            except EffectiveCurrentResourceLimitError as exc:
+                records.append({
+                    "kind": "scope",
+                    "label": label,
+                    "outcome": "bounded_rejection",
+                    "resource_limit_code": exc.code,
+                })
+                continue
             conversations = conn.execute("SELECT COUNT(*) FROM effective_current_scope").fetchone()[0]
             nodes = conn.execute("SELECT COUNT(*) FROM effective_current_nodes").fetchone()[0]
-            print(
-                f"scope {label} conversations {conversations} nodes {nodes} seconds {seconds:.6f}"
-            )
+            records.append({
+                "kind": "scope", "label": label, "outcome": "completed",
+                "conversations": conversations, "nodes": nodes, "seconds": seconds,
+            })
     finally:
         conn.close()
+    return records
 
 
-def benchmark_chains(depths: list[int]) -> None:
+def benchmark_chains(depths: list[int]) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
     for depth in depths:
         conn = _connection()
         try:
@@ -76,11 +91,22 @@ def benchmark_chains(depths: list[int]) -> None:
                 ((f"n{index}", f"n{index - 1}" if index else None) for index in range(depth)),
             )
             conn.commit()
-            seconds = _elapsed(lambda: ensure_effective_current_views(conn, ["chain"]))
+            try:
+                seconds = _elapsed(lambda: ensure_effective_current_views(conn, ["chain"]))
+            except EffectiveCurrentResourceLimitError as exc:
+                records.append({
+                    "kind": "chain", "depth": depth, "outcome": "bounded_rejection",
+                    "resource_limit_code": exc.code,
+                })
+                continue
             nodes = conn.execute("SELECT COUNT(*) FROM effective_current_nodes").fetchone()[0]
-            print(f"chain depth {depth} nodes {nodes} seconds {seconds:.6f}")
+            records.append({
+                "kind": "chain", "depth": depth, "outcome": "completed",
+                "nodes": nodes, "seconds": seconds,
+            })
         finally:
             conn.close()
+    return records
 
 
 def main() -> int:
@@ -89,8 +115,17 @@ def main() -> int:
     parser.add_argument("--chains", default="1000,5000,10000")
     args = parser.parse_args()
     depths = [int(value) for value in args.chains.split(",") if value]
-    benchmark_scopes(max(1, args.conversations))
-    benchmark_chains(depths)
+    records = [
+        *benchmark_scopes(max(1, args.conversations)),
+        *benchmark_chains(depths),
+    ]
+    print(json.dumps({
+        "schema": "chatgpt-sqlite-webui-effective-current-benchmark-v2",
+        "records": records,
+        "bounded_rejections": sum(
+            item.get("outcome") == "bounded_rejection" for item in records
+        ),
+    }, sort_keys=True, separators=(",", ":")))
     return 0
 
 

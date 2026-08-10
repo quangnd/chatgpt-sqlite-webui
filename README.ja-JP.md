@@ -2,25 +2,20 @@
 
 言語: [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文（臺灣）](README.zh-TW.md) | [日本語](README.ja-JP.md) | [Español](README.es-ES.md)
 
-公式 ChatGPT エクスポート ZIP を、プライベートで検索可能な SQLite ナレッジアーカイブに変換します。
+公式 ChatGPT エクスポート ZIP を、非公開で検索可能な SQLite アーカイブに変換します。CLI またはローカル Web UI からインポートし、ブラウザーで会話を読んだり検索したり、Markdown/TXT へエクスポートしたりできます。すべて自分のコンピューター上で動作します。
 
-`Local-first` · `SQLite` · `Privacy-first` · `Fast import` · `Fast Web index` · `Chat-style Web UI` · `Markdown/TXT export`
-
-ChatGPT Export Archiver は、OpenAI / ChatGPT の公式 export ZIP を直接 SQLite に取り込み、アーカイブを検証し、検索インデックスを作成し、ローカル Web UI を開き、会話を Markdown または TXT にエクスポートします。長期的な個人アーカイブ、オフライン検索、ナレッジベース移行、そして公式履歴 UI では扱いにくいローカルファイルとインデックスのワークフロー向けです。
+`ローカル優先` · `SQLite` · `非公開検索` · `CLI` · `Web UI` · `Markdown/TXT エクスポート`
 
 ## 使う理由
 
-- **ローカル優先でプライベート。** ZIP、データベース、エクスポート、一時アップロードコピー、Web UI、ログは、自分で移動しない限り手元のマシンに残ります。
-- **ZIP を直接インポート。** 公式 ChatGPT エクスポート ZIP を、手動展開や shard 結合なしで読み込めます。
-- **大きなアーカイブに対応。** 推奨インポート経路は大きな ZIP、増分インポート、遅延 FTS 再構築、最適化された任意 Web 検索インデックスを想定しています。
-- **チャット形式のリーダー。** Web UI は既定で ChatGPT に近い表示になり、user は右、assistant は左、system/internal は既定で折りたたまれ、必要に応じて展開できます。
-- **従来の技術ビューも保持。** Settings、または `?layout=classic` / `?messageLayout=classic` で、以前の行単位レイアウトに戻せます。
-- **アーカイブ向け検索。** 長期アーカイブとローカル検索では、SQLite 検索により公式履歴 UI より細かく制御できます。role/title/source/scope/exclude、フレーズ、OR、ページング、verify、再構築可能なインデックス、エクスポートを利用できます。
-- **移行しやすいエクスポート。** Markdown と TXT は決定的に生成され、バックアップ、ローカルナレッジベース、オフライン grep、移行に使いやすい形式です。
+- **非公開でローカル。** ZIP、データベース、エクスポート、一時アップロード、Web UI、ログは自分のコンピューターに保存されます。
+- **直接・差分インポート。** 公式 ZIP や展開済み JSON シャードを結合せずに読み込み、既存アーカイブを安全に更新できます。
+- **読みやすく検索しやすい。** チャット形式リーダー、クラシック表示、フィルター、フレーズ、除外、ページング、任意の高速インデックスを利用できます。
+- **持ち運べる出力。** 再現可能な Markdown/TXT をバックアップ、オフライン利用、移行に使えます。
 
 ## スクリーンショット
 
-安全なスクリーンショットは準備中です。スクリーンショットには synthetic な会話だけを使い、実際のタイトル、snippet、raw JSON、メールアドレス、ローカルパスを含めないでください。
+スクリーンショットには合成会話だけを使い、実在するタイトル、メッセージ、ファイル名、メールアドレス、ローカルパスを表示しないでください。
 
 ## このプロジェクトでできること
 
@@ -36,28 +31,20 @@ ChatGPT Export Archiver は、OpenAI / ChatGPT の公式 export ZIP を直接 SQ
 
 ## プライバシー
 
-すべての処理はローカルで実行されます。データベース、生成されたエクスポート、アップロード時の一時コピー、Web UI、ログは、あなた自身が移動または公開しない限り手元のマシンに残ります。CLI は意図的に、本文の断片ではなく ID、件数、タイムスタンプ、状態行を表示します。CLI summary とログには、会話本文、タイトル、snippet、raw JSON、完全な入力/出力パス、実際の ZIP ファイル名は出力されません。インポート summary は `source zip` のように入力種別だけを表示します。Web UI はローカル利用を想定しており、既定では `127.0.0.1` にバインドします。
-
-インポート summary の `valid_conversations` は、重複 ID の統合前に解析を通過した入力 conversation 要素数です。重複 ID が統合される場合、最終的なデータベース変更件数である `inserted_conversations`、`updated_conversations`、`unchanged_conversations` より大きくなることがあります。
-
-`inspect` と scanner のエラーは、既定では実際の ZIP 名や完全なパスを表示しません。`verify`、`stats`、`search`、`export` など既存データベースを必要とする CLI コマンドは、データベースパスが間違っている場合に `database_not_found` を報告し、空の SQLite ファイルを作成しません。Web 検索は、利用可能な場合に任意の trigram インデックスを候補取得レイヤーとして使い、その後も正規化済み部分文字列フィルターを適用するため、短いクエリ、記号、trigram 非対応のケースは安全にフォールバックします。
-
-`--delete-input-on-success` は fail-closed の互換 option です。現在の Python/OS primitive では最終検証前に同じ inode を開いた非協調 writer を排除できないため、production command は DB、journal、staging、rename の前に `delete_input_secure_identity_unsupported` を返します。通常 import は元入力を削除せず利用でき、`recover-delete-input` は過去の supported run が残した project-owned journal 専用です。
-
-それでも、データベースやエクスポートされた Markdown / TXT には個人的な会話内容が含まれる可能性があります。`archive/*.db`、エクスポート済みファイル、元の ChatGPT エクスポート ZIP は機密データとして扱ってください。
+すべてローカルで動作し、Web UI は既定で `127.0.0.1` にバインドします。通常のインポートは元の ZIP を削除せず、ブラウザーアップロードはサーバー側の一時コピーを使います。データベースとエクスポートには非公開の会話内容が含まれるため、安全に保管してください。
 
 ## 必要条件
 
-- Python 3.10 以降。Web 依存関係の再現可能インストールは Python 3.12 で検証しています。
-- JSON 対応 SQLite。FTS5 は任意で、利用不能または `message_fts` がない場合も安全な scan 検索を使えます。
-- React Web UI を再ビルドしたりフロントエンド検査を実行したりする場合のみ、Node.js と npm が必要です。runnable 配布には `webui/dist` が含まれるため、通常のローカル Web UI 利用ではフロントエンドの再ビルドは不要です。
-- コア CLI は Python 標準ライブラリだけで動作します。ZIP upload を含む Web UI を使う場合は `requirements-web.txt` をインストールしてください。この profile がなければ `web` command は install hint とともに即時失敗します。
+- Python 3.10 以上。Web の依存関係は Python 3.13 でテストされています。
+- JSON 対応 SQLite。FTS5 は任意で、なくてもスキャン検索を利用できます。
+- Node.js と npm は React Web UI の再ビルドまたはテスト時だけ必要です。
+- CLI は Python 標準ライブラリを使います。Web UI とブラウザー ZIP アップロードには `requirements-web.txt` をインストールしてください。
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
-python -m pip install -r requirements-web.txt -c constraints-web-py312.txt
+python -m pip install -r requirements-web.txt -c constraints-web-py313.txt
 ```
 
 Windows PowerShell:
@@ -66,7 +53,7 @@ Windows PowerShell:
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
-python -m pip install -r requirements-web.txt -c constraints-web-py312.txt
+python -m pip install -r requirements-web.txt -c constraints-web-py313.txt
 ```
 
 Windows cmd.exe:
@@ -75,10 +62,8 @@ Windows cmd.exe:
 py -3 -m venv .venv
 .venv\Scripts\activate.bat
 python -m pip install -U pip
-python -m pip install -r requirements-web.txt -c constraints-web-py312.txt
+python -m pip install -r requirements-web.txt -c constraints-web-py313.txt
 ```
-
-Python 3.12 constraints は cross-platform resolved-version profile で、artifact hash はありません。`requirements-web-py312-macos-arm64.lock` は CPython 3.12/macOS arm64 専用です。download した wheel の実 byte を検証するのは `pip --require-hashes --only-binary=:all:` による install です。`python tools/verify_web_hash_lock.py` は lock の構造、target、version、hash 構文だけを検査します。他の platform は trusted index の portable profile を使用してください。
 
 ## クイックスタート
 
@@ -181,17 +166,11 @@ python chatgpt_archive.py export --db archive/chatgpt_archive.db --format all --
 python chatgpt_archive.py export --db archive/chatgpt_archive.db --format md --out exports --from 2024-01-01 --to 2024-12-31 --force
 ```
 
-エクスポート summary は本文ファイルの件数を示します。`written` は最終バイト列が変わった Markdown/TXT 本文ファイル数、`skipped_unchanged` は変更のなかった Markdown/TXT 本文ファイル数です。manifest は必要に応じて更新されますが、この 2 つの件数には含まれません。
-
-CLI と Web のエクスポートは、有効な現在パスと表示メッセージのみを既定にします。分岐や内部メッセージを含める場合は `--path all` と `--include-internal` を明示し、manifest にも両方の選択を記録します。CLI は会話ノードを上限付きバッチで読み、Web ダウンロードと`現在のパスの会話をコピー`は専用の上限付きサーバー側テキストストリームを使います。完全な標準テキストと対象となる legacy/raw 復元テキストは reader 応答予算により切り詰められません。
-
 任意の Web 検索インデックスを再構築します。
 
 ```bash
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 ```
-
-`web-index` は明示的な段階で message/title を正規化し、対応時に trigram index を構築します。build ごとに予測不能な staging 名と永続 owner-token lease を使い、2 個目の build は `web_index_build_in_progress` で拒否され、stale cleanup も厳密な所有権を検証します。全段階は上限付き keyset と個別の input/normalized/derived/FTS-bind byte budget を使い、実測 peak を報告します。writer lock は batch 間で解放され、最後の短い `BEGIN IMMEDIATE` transaction で canonical generation、object ownership、metadata を再確認して atomic publish します。それまでは reader が旧 index を参照します。generation change、interrupt、disk error、cancel は旧 index を維持し、その lease が所有する object だけを cleanup します。`POST /api/import/jobs/{job_id}/web-index/cancel` は import job の index stage にのみ適用されます。
 
 Web UI を起動します。
 
@@ -207,57 +186,29 @@ python chatgpt_archive.py web --db archive/chatgpt_archive.db --port 8787
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --no-input-sha256 --rebuild-fts
 ```
 
-入力は ZIP、単体の `conversations.json`、または `conversations.json` か sharded `conversations-*.json` ファイルを含む展開済みディレクトリにできます。scanner discovery は `__MACOSX`、AppleDouble `._*` ファイル、`.DS_Store` などの macOS metadata paths を無視するため、これらのローカル artifact が conversation source になることはありません。
-
-ディレクトリ入力では、POSIX プラットフォームは利用可能な場合に各 component を `dir_fd` と `O_NOFOLLOW` で開きます。portable fallback は symlink/reparse component を拒否し、パスによる open の直前に containment を検証しますが、Python 標準ライブラリだけでは全プラットフォームのローカル replacement race を完全には排除できません。信頼できないローカルユーザーや並行プロセスが変更できる展開済みディレクトリをインポートせず、この脅威モデルでは元の読み取り専用 ZIP を使用してください。
-
 インポート後に SQLite の planner statistics と FTS インデックスをさらに整理したい場合は、次を使います。
 
 ```bash
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --no-input-sha256 --rebuild-fts --optimize-after-import --optimize-fts-after-import
 ```
 
-`--delete-input-on-success` は既定で無効で、現在は全 platform で unsupported です。指定時は staging/import 前に `delete_input_secure_identity_unsupported` で失敗し、race のある unlink へ downgrade しません。
+`--delete-input-on-success` は互換性のため残されていますが利用できず、インポート前に失敗します。通常のインポートは元の ZIP を削除しません。データベース検証後に自分で削除してください。
 
 ```bash
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --no-input-sha256 --rebuild-fts --delete-input-on-success
 ```
 
-増分インポートは通常の使い方です。新しいエクスポートを同じデータベースへ入れると、変更済みの会話だけが更新され、残りのアーカイブは保持されます。
-
 ## Web UI ワークフロー
 
-Web UI は FastAPI が配信するローカル React アプリです。推奨される使い方は、runnable tree に含まれるビルド済みの `webui/dist` をそのまま配信することです。
+次のコマンドでローカル Web UI を起動します。既存データベースを開くことも、データベースなしで起動してブラウザーから ZIP をインポートすることもできます。リーダーはページング対応のチャット/クラシック表示、検索、内部メッセージ制御、コピー、ダウンロードを提供します。
 
 ```bash
 python chatgpt_archive.py web --port 8787
 ```
 
-既定のリーダーレイアウトは `chat` です。user メッセージは右、assistant メッセージは左に配置され、system/internal メッセージは折りたたみ表示になります。以前の行単位の技術レイアウトを使うには、Settings で `Classic` を選ぶか、Web UI の URL に `?layout=classic` または `?messageLayout=classic` を追加してください。
-
-すべての経路で同じ `path=current` effective-current 規則を使います。conversation に属する有効な `current_node` とその親 chain が raw flag 全ゼロでも最優先です。次に決定的な利用可能 `is_on_current_path=1` leaf chain を選び、どちらもなければその conversation だけ all に fallback します。raw flag は変更せず、応答は `current_node_exists`、`current_collection_source`、`current_path_fallback_to_all`、`effective_path`、各 node の effective visibility を返します。壊れた親や cycle は有限かつ決定的に診断されます。
-
-コピーと export は reader の表示設定に従います。`現在のパスの会話をコピー` は現在の reader パスに対する上限付き complete-text stream を使います。`表示中をコピー` は読み込み済みの表示 message ID だけを送り、server が一つの SQLite read snapshot から stream するため、writer の前後を混在させません。download も同じ path と Show internal 設定を使います。message raw entry は上限付きの大きな raw プレビューで、truncated response は plain `raw_text` を表示します。
-
-reader が `around_node_id` でヒットへ移動する場合は、reader と同じページング集合を使います。Show internal がオフなら visible-only rows、Show internal がオンなら完全な node collection、current-path node がない壊れた conversation では effective all-node collection です。
-
-データベースがある場合は明示的に指定するか、既定のパスを使えます。データベースがない場合でも Web UI を起動し、インポートパネルから ChatGPT エクスポート ZIP をアップロードできます。アップロードインポートは直列化され、同じプロセス内で同時に動く SQLite writer は 1 つだけです。
-
-Web アップロードインポートが成功すると、バックエンドは CLI と同じコア import pipeline を使い、その後 `verify`、`stats`、`web-index` を実行します。アップロードされた ZIP はサーバー側の一時コピーであり、ディスク上の元ファイルとは独立して削除されます。
-
-preflight failure と terminal import job は複数の `cleanup_warnings` を返す場合があります。React UI は各 safe warning code と `path_kind` を localized user text で表示し、deprecated single `cleanup_warning` fallback も維持します。一時 path、filename、OS message、error class detail は表示せず、polling は同じ job snapshot を置換するため warning を重複追加しません。
-
-ビルド済み React アプリを提供できない場合の fallback HTML は、機能を限定した緊急 UI であり、完全な reader の代替ではありません。検索/reader 操作は少なく、download は明示指定しない限り internal node を除外します。完全な UI には `webui/dist` を再ビルドしてください。
-
 ## Web アップロードの安全制限
 
-Web アップロードは、インポート job の開始前にアプリケーションレベルの安全制限を適用します。これらは環境変数で制御され、CLI の `import`（これらの制限を使用しません）とは独立しています。
-
-Web アップロードは、ファイル読み取り前に pending slot を予約するため、大きなアップロードが別の writer と競合することはありません。その予約後のあらゆるエラー、たとえば一時アップロードパスの作成失敗では、slot を解放し、サーバー側の一時ディレクトリを削除する必要があります。成功した import job は slot と一時コピーを引き継ぎます。
-
-process kill、OOM、または host crash は通常の cleanup を回避し、OS の一時ディレクトリに古い `chatgpt-archive-upload-*` ディレクトリを残す場合があります。本リリースは ownership/age の誤判定による無関係なデータ削除を避けるため、自動削除しません。サーバー停止後、管理者は正確な prefix、現在のアカウントの ownership、経過時間、symlink/reparse point がないこと、使用中 job がないことを確認した個別の古いディレクトリだけを削除できます。ユーザーの export ZIP や未確認 wildcard は絶対に削除しないでください。
-
-Web UI が loopback アドレス（`127.0.0.1`、`localhost`、`::1`）にバインドされている場合、デフォルトで大規模な信頼できるアーカイブを許可します：
+ブラウザーアップロードはインポート前に検査されます。ループバックでは下表の大容量ローカル既定値を使います。非ループバックアクセスは明示的な有効化が必要で、信頼済みローカルプロファイルを選ばない限り小さい安全な既定値が適用されます。CLI `import` はこの制限の対象外です。
 
 | 環境変数 | ローカルデフォルト | 制御対象 |
 |---|---|---|
@@ -268,10 +219,6 @@ Web UI が loopback アドレス（`127.0.0.1`、`localhost`、`::1`）にバイ
 | `CHATGPT_ARCHIVE_MAX_UPLOAD_COMPRESSION_RATIO` | 1,000.0 | 大規模 JSON member の最大圧縮率 |
 | `CHATGPT_ARCHIVE_MAX_UPLOAD_TOTAL_MEMBERS` | 100,000 | ZIP 内の総 member 数の上限 |
 | `CHATGPT_ARCHIVE_REMOTE_UPLOAD_PROFILE` | unset | 信頼できる非 loopback ネットワークでのみ `local` に設定し、未設定のアップロード制限にローカル既定値を使う |
-
-**リモートバインドポリシー。** 非 loopback は `CHATGPT_ARCHIVE_ALLOW_REMOTE_ACCESS=true`、`CHATGPT_ARCHIVE_ALLOW_REMOTE_UPLOADS=true`、または `CHATGPT_ARCHIVE_REMOTE_UPLOAD_PROFILE=local` による明示的 opt-in が必要です。remote-safe 既定値は 128 MiB ZIP、256 MiB/JSON member、512 MiB 総非圧縮、圧縮比 200.0、200 JSON members、10,000 ZIP members です。信頼済み loopback/local の圧縮比既定値は 1000.0 です。`ALLOW_REMOTE_UPLOADS` は明示設定した制限だけを緩和し、未設定値は remote-safe のままです。`REMOTE_UPLOAD_PROFILE=local` は未設定の全制限を local の大容量既定値へ戻すため、信頼済み LAN だけで使ってください。
-
-`/api/schema` は有効な upload policy を報告します。すべての upload に有効な `Content-Length` が必要です。最初の body receive 前に multipart parser の temporary filesystem を検査し、parse 後に project upload directory と database filesystem を別々に検査します。これらは別 disk の場合があります。parser spool、server ZIP、DB、WAL/TEMP、index 用の空き容量を確保してください。
 
 正規の大規模アーカイブのためにローカル制限を引き上げるには、Web UI 起動前に対応する変数を設定します：
 
@@ -324,15 +271,11 @@ export CHATGPT_ARCHIVE_REMOTE_UPLOAD_PROFILE=local
 python chatgpt_archive.py web --host 0.0.0.0 --port 8787
 ```
 
-信頼できるローカルファイルにのみ、より高い制限を設定してください。値を大きくすると、ZIP bomb、ディスク圧迫、CPU/メモリのリスクが高まります。
-
 ## 検索構文
 
-CLI 検索は安全な検索構文を使います。通常語は normalized substring `contains` で既定は AND、大文字 `OR` は選択肢を作ります。引用符は phrase を保ち、`-term`/`-"quoted phrase"` は除外です。`word` 境界は ASCII の文字・数字・underscore だけに適用し、CJK は保守的な normalized contains のままです。query 内の raw `path:`/`scope:` は UI selector より優先されます。
+検索では通常語、引用フレーズ、大文字の `OR`、`-term` 形式の除外、`role:user`、`source:zip`、`path:current`、`path:all`、`scope:title`、`scope:message` などのフィルターを使えます。クエリは生 SQL ではなく検索文字列です。
 
-除外語は会話結果では conversation-level の意味です。選択中の検索 scope と path 内で、タイトルまたは任意のメッセージが除外 fragment に一致すると、その conversation は返されません。`/api/search/messages` は、除外 fragment を含まないメッセージヒットだけを返します。`path:current` は conversation ごとの reader パスに従います。壊れたアーカイブに current-path node が 1 つもない場合、current-path 検索は reader が表示する同じ all-node ビューへ fallback します。
-
-日付 filter は UTC calendar day を使い、開始は `00:00:00Z` を含み、終了は翌日 `00:00:00Z` を排他的上限にします。CLI export の timestamp と deterministic filename date は UTC、browser 表示は browser local timezone です。Web 検索欄は 500 文字までです。virtual list の未 render 行は Cmd/Ctrl+F では見つからないため、archive search または conversation copy を使ってください。
+日付フィルターとエクスポート期間は UTC の暦日を使います。ブラウザーの Cmd/Ctrl+F は描画済み行だけを対象にするため、未読込内容にはアーカイブ検索または会話コピーを使ってください。
 
 ```bash
 python chatgpt_archive.py search --db archive/chatgpt_archive.db "python sqlite"
@@ -346,32 +289,24 @@ Web 検索は `web-index` が作成する任意の normalized trigram インデ�
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 ```
 
-検索 diagnostics は best-effort の性能ヒントです。normalized trigram、normalized scan、normalized title scan、full scan など、normalized-safe な候補層または scan fallback だけを報告します。legacy raw FTS の存在は別項目として報告できますが、正規化等価テキストを見落とす可能性があるため、実際の candidate backend として表示してはいけません。
-
-`VACUUM`、`VACUUM INTO` を手動で実行した場合、または外部の圧縮/バックアップツールで SQLite データベースを書き直した場合は、Web UI 検索に頼る前に `python chatgpt_archive.py web-index --db <archive.db>` をもう一度実行してください。任意 Web インデックスは正規の会話テーブルから安全に再構築でき、元の会話データは変更しません。
-
 ## 検証と任意 Web インデックス
 
-`verify` は SQLite integrity とプロジェクト固有の整合性を確認します。missing current node、broken parent link、空の会話、親ノードの cycle も対象です。
+インポート後に `verify` を実行して SQLite と会話リンクを検査してください。
 
 ```bash
 python chatgpt_archive.py verify --db archive/chatgpt_archive.db
 ```
 
-`message_fts_rebuildable` は定数ではなく実際の runtime capability です。FTS missing かつ FTS5 available なら `missing` と rebuildable true、FTS5 module unavailable なら `capability_unavailable` と rebuildable false、damaged table なら `damaged` を返し、rebuildability は同じ bounded runtime probe で決まります。その他の SQLite error は structured database error classifier に伝播します。
-
-`PRAGMA integrity_check` が `web_message_trigram` または `web_title_trigram` の FTS5 inverted index 破損を報告した場合、コアの会話データは構造的に有効で、任意の Web 検索インデックスだけが壊れている可能性があります。その場合、`verify` は `optional_web_index_error true` と復旧ヒントを表示します。任意 Web インデックスは次で再構築します。
+CLI FTS と Web 部分文字列インデックスは任意です。`verify` が任意 Web インデックスのエラーを報告した場合は、再構築してもう一度検証してください。
 
 ```bash
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 python chatgpt_archive.py verify --db archive/chatgpt_archive.db
 ```
 
-この診断は保守的です。すべての integrity-check エラーが任意 Web インデックステーブルまたはその FTS5 shadow tables に帰属できる場合だけ、任意 Web インデックス問題として扱います。
-
 ## ログ
 
-ログレベルは `debug`、`info`、`warning`、`error`、`none` です。既定値は `warning` です。詳細なレベルほど、それより静かなレベルの内容も含みます。ログにはタイトル、snippet、raw JSON、メッセージ本文を含めません。
+ログレベルは `debug`、`info`、`warning`、`error`、`none` で、既定は `warning` です。ログには状態と件数だけを記録し、会話タイトル、メッセージ、抜粋、生 JSON は含めません。
 
 ログフラグはサブコマンドの前にも後にも置けます。
 
@@ -382,11 +317,9 @@ python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_Z
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --json-logs --log-file logs/import.jsonl
 ```
 
-JSON ログは `logs/` のような ignore 済みの場所に置いてください。`*.jsonl` はローカルログ成果物として扱われ、delivery clean で拒否されます。
-
 ## ソースからビルド
 
-Python のチェックを実行し、最初の delivery clean の前に安全な生成物を削除します。
+次のコマンドはプロジェクト検査、Web UI のビルド、生成物の削除、実行可能配布物の検査に使います。
 
 ```bash
 python -m compileall chatgpt_archive.py chatgpt_export_archiver tests tools
@@ -409,10 +342,6 @@ python tools/clean_generated_artifacts.py --fail-on-blocked
 python tools/check_delivery_clean.py --mode runnable .
 ```
 
-`clean_generated_artifacts.py` はクロスプラットフォームで、`webui/dist` は保持します。安全に再生成できるファイルだけを削除し、データベース、ZIP、SQLite sidecar、`archive/`、`exports/`、`logs/` は削除しません。delivery clean がこれらの機密パスをまだ報告する場合は、プロジェクトルート外へ移動するか手動で削除してください。受け入れ確認コマンドでは `--fail-on-blocked` を使うため、機密ファイルが残っている場合は delivery flow がすぐに停止します。
-
-Windows PowerShell または cmd では、空白を含む search query に二重引用符を使ってください。例: `"python sqlite"`、`"role:user path:current python -pandas"`。上記の Python、Web、Web index、typecheck、build、cleanup、delivery-check コマンドは、Python と Node が `PATH` にあれば macOS、Windows、Linux で使えます。Windows で Python launcher を使う場合は、`py -3 tools/clean_generated_artifacts.py --fail-on-blocked` で cleanup helper を実行できます。
-
 ZIP 配布物を確認する場合:
 
 ```bash
@@ -421,17 +350,11 @@ python tools/check_delivery_clean.py --mode runnable path/to/delivery.zip
 
 ## パッケージ内容
 
-runnable delivery には Python ソース、テスト、ドキュメント、`requirements-web.txt`、`constraints-web-py312.txt`、`webui/src`、`webui/tests`、`webui/scripts` のフロントエンドソースとテスト、フロントエンド設定/package ファイル、`webui/dist` のビルド済み assets を含めます。`webui/node_modules`、`webui/tsconfig.tsbuildinfo`、Python cache ディレクトリや bytecode、coverage/typecheck cache、`.DS_Store`、AppleDouble `._*` ファイル、`__MACOSX`、`Thumbs.db`、`Desktop.ini`、`.gitignore.md`、一時ログ、ローカル受け入れログ、`*.log`、`*.ndjson`、`*.jsonl`、`archive/`、`exports/`、任意の `*.zip`、`conversations*.json`、`*.db`、`*.sqlite`、`*.sqlite3` などの実データベースファイル、または `*.db-journal`、`*.sqlite-wal`、`*.sqlite-shm`、`*.sqlite-journal`、`*.sqlite3-wal`、`*.sqlite3-shm`、`*.sqlite3-journal` などの SQLite sidecar は含めないでください。ディレクトリ検査では対象ルート直下の `.git` は許可されるため通常の Git clone をそのまま検査できますが、入れ子の `.git` は失敗します。ZIP delivery ではどの `.git` エントリも失敗します。
-
-source-only delivery では `webui/dist` を省略できますが、その場合は完全な React UI を配信する前にフロントエンドを再ビルドする必要があります。
+実行可能パッケージには Python ソース、テスト、文書、Web の依存関係とソース、ビルド済み `webui/dist` を含めます。データベース、エクスポート、ZIP、ログ、キャッシュ、`node_modules`、その他のローカルデータは含めないでください。
 
 ## データベース概要
 
-メインデータベースは conversations、mapping nodes、import runs、warnings を保存します。message object だけが raw message JSON object を保持し、conversation と mapping-node object は正規化され、byte-for-byte 保存ではありません。入力 ZIP SHA-256 は任意で、`source_files`/`file_index` の entry SHA 列は予約済みですが現在は未設定です。CLI FTS テーブルは `message_fts` です。任意 Web 検索用の補助テーブルには `web_message_norm`、`web_title_norm`、`web_message_trigram`、`web_title_trigram` と SQLite FTS5 shadow tables が含まれます。
-
-canonical DB は `PRAGMA user_version` version 6 です。旧 DB の read-only entry は `database_migration_required` を返します。Migration capacity は predecessor step ごとに計算し、table rewrite/backfill だけが rewrite と journal space を予約します。v5 metadata/query-generation step は全 node rewrite を仮定しません。`BEGIN IMMEDIATE` 内で mutation 前に size、row、sidecar、planned steps、free space を再確認します。exact compatibility scan は batch 化され cancel 可能です。cancel、ENOSPC、SQLite failure は rollback し、current clean DB の migrate は true no-op です。
-
-Health と `verify` は任意の `message_fts` の欠落と破損を区別します。破損時は `optional_message_fts_error` と `--rebuild-fts` の復旧ヒントを返します。一般的な malformed、locked、readonly、I/O、SQL runtime failure は能力欠落として扱わず、`database_malformed`、`database_locked`、`database_readonly`、`database_io_error`、`database_runtime_failure` を使います。
+SQLite には会話、メッセージ、インポート履歴、警告、任意検索インデックスが保存されます。`database_migration_required` が表示された場合はバックアップを作成してから `python chatgpt_archive.py migrate --db archive/chatgpt_archive.db` を実行してください。
 
 ## 既知の制限
 
@@ -441,36 +364,6 @@ Health と `verify` は任意の `message_fts` の欠落と破損を区別しま
 - エクスポートファイル名の部品は Windows と Unix 系の両方に向けてサニタイズされます。`CON`、`AUX`、`COM1`、`LPT9`、`COM¹`、`LPT²` などの予約デバイス名、末尾のドットや空白も対象です。
 - 非常に大きなアーカイブでは、インポート、FTS 再構築、Web trigram インデックス作成に時間がかかることがあります。大規模インポートでは `--rebuild-fts` 経路を優先してください。
 
-## セキュリティとレスポンス契約
+## 安全上の注意
 
-アップロード入口は `Origin`、`Content-Length`、`Sec-Fetch-Site` をそれぞれ 1 値だけ受け付けます。Origin は userinfo、path、query、fragment、制御文字、カンマチェーンを含まない単一の HTTP(S) origin、Content-Length は正規形の非負 ASCII 10 進整数でなければなりません。重複または不正な安全ヘッダーは multipart 解析前に拒否し、無効または非有限の圧縮率設定は有限な安全 profile 既定値へ戻します。
-
-全 request で Host を検証し、non-loopback bind は `CHATGPT_ARCHIVE_ALLOWED_HOSTS` または CLI `--allowed-hosts` が必要で `*` は拒否します。trusted proxy は `CHATGPT_ARCHIVE_TRUSTED_PROXIES` または `--trusted-proxies` で設定する strict single-edge contract です。remote write は same-origin `Origin` が必要です。重複・不正な Fetch Metadata は拒否し、shallow `/api/health` を除く API read でも `Sec-Fetch-Site: cross-site` を拒否します。static UI、`none` の直接 navigation、header を送らない CLI client は互換です。
-
-失敗 stage には source read も含み、`upload_preflight_failed`、`input_source_open_failed`、`input_source_not_regular_file`、`source_read_failed`、`source_changed_during_read`、`invalid_conversation_encoding`、`json_integer_too_large` を安定 code として返します。cleanup は構造化 `cleanup_warnings` 配列で、旧 `cleanup_warning` は先頭項です。
-
-upload は receive 前に parser spool filesystem、parse 後に server ZIP と DB filesystem を検査します。Import、migration、optional Web index も capacity preflight と reserve を使います。ENOSPC は安定した `*_disk_space_insufficient` code を返し、transaction は rollback します。
-
-単独 JSON、directory、ZIP は同じ bounded hybrid array parser と一つの transaction を使います。普通の complete element は通常 C decoder 一回で成功します。uncertain/spanning element は bounded failed fast probe を一回行う場合がありますが、その後は persistent lexical framer を使い、増える prefix を繰り返し decode しません。
-
-descriptor-bound stat/hash/read で file identity を検証します。strict delete は staging 前に拒否し、recovery は historical project-owned journal のみ扱います。Migration は定義が完全一致する既知 predecessor のみ受け入れます。
-
-非標準 JSON `NaN` / `Infinity`（`1e9999` のような overflow する標準数値を含む）は拒否され、無効な timestamp は内容を含まない warning とともに `NULL` になります。既定 message API は reader budget で制限された `display_text` を一つだけ返し、truncation/total-exactness metadata で完全復元の可否を示し、`content_text`/`render_text` を重複しません。通常の CLI/Web read と既定 `/api/health` は bounded schema gate を使い、`foreign_key_check` を実行しません。`verify` と `/api/health?deep=true` は完全で正確な検査と freshness fields を返します。複数 statement の CLI/Web logical read は schema/capability probe 前に一つの SQLite read snapshot を開始し、stream の完了・失敗時に解放します。Effective-current、pagination、around-node の意味は維持されます。
-
-「URL をコピー」は `match_mode`、`layout`、`show_internal` と共有可能な search/reader state を必ず明示します。URL の明示値は `localStorage` より優先され、欠落値だけがローカル設定を使います。本版は `replaceState` を使い、ブラウザーの戻る/進むで段階的な検索・選択履歴を復元しません。
-
-JSON は `NaN`/`Infinity` と `1e9999` のような overflow を拒否します。invalid timestamp は `NULL` と型だけの warning になります。通常の CLI/Web read と既定の `/api/health` は bounded schema gate のみを実行し、`foreign_key_check` は行いません。`verify` と `/api/health?deep=true` が全 database check を stream 処理します。total は exact、sample は bounded で、mode、完了時刻、generation、stale fields が契約を示しますが、CPU/VM work は database size に比例します。
-
-長い表示本文は revision-bound opaque cursor と SQLite incremental BLOB read を使います。numeric offset の compatibility scan は 1,048,576 文字までで、それ以降は cursor が必要です。raw preview は NUL-safe な bounded BLOB query 1 回で、byte size と exact 状態を返します。visible NUL と孤立 surrogate は一貫して U+FFFD、raw JSON は安全な escape のままです。検索結果 scalar は明示的な表示 budget と truncation/元 length metadata を持ち、ID は切り詰めません。
-
-CLI/Web conversation export は、materialize 前に 100,000 node、1 node の canonical/raw input 32 MiB、conversation input 合計 128 MiB を超える処理を拒否し、stream output は 256 MiB 上限です。effective-current の online materialization も conversation ごとに 100,000 node と graph ID input 128 MiB が上限です。CLI は同じ target directory の temporary file に分割書き込みし、hash と旧 file の streaming 比較を同時に行い、変更時だけ atomic replace します。browser copy は `ReadableStream` を使い、16 MiB UTF-8 または 8 Mi 文字を超えると clipboard write 前に中止して Download を案内し、partial text は書き込みません。
-
-archive-wide export は conversation を 1 回 keyset scan して同じ output directory の temporary SQLite plan に置き、filename allocation、hash、JSONL/CSV manifest を stream 処理します。上限は 1,000,000 conversations、plan metadata 1 GiB、manifest ごと 2 GiB です。global effective-current は 100,000 conversations、1,000,000 nodes、graph input 512 MiB、推定 temp 1 GiB、batch 20,000 rows/nodes と 64 MiB input に制限されます。
-
-message search page は常に `total_exact` を返し、scan 完了時は `count_total=false` でも true にできます。`order_exact`、`scan_complete`、`provisional_order` は order/scan を独立表示し、continuation がある場合 `next_offset=null` です。conversation search も同じ契約です。streaming placeholder classifier は任意 leading whitespace で reader/search/index/copy/export を一致させます。
-
-filter-only/exclude-only は conversation を絞れますが、message hit、reader highlight、hit navigation には正の message text term が必要です。Copy URL は同じ applied search/list/selection context を使い、debounce 前の入力を古い selection と混ぜません。日本語とスペイン語 UI は partial translation と明示表示されます。release は collector とは独立した authoritative required-file list を先に検証し、必要な source/config/doc が欠ければ旧 ZIP を置換せず失敗します。
-
-Python `zipfile` と本プロジェクトの import pipeline は ZIP64 構造をサポートし、小さな forced-ZIP64 member の回帰テストがあります。ただし通常の acceptance suite では物理サイズ 4 GiB 超の ZIP は生成していません。member、byte、compression ratio、disk、CPU の全上限は引き続き適用されます。
-
-長時間の CLI/Web streaming export は、完了、失敗、または client disconnect まで一つの SQLite read snapshot を保持します。WAL mode では長い reader が checkpoint を遅らせ、concurrent writer により WAL が増える場合があります。duration、CPU/VM work、WAL、temporary disk は選択データ量に比例し、snapshot consistency を壊して早期 checkpoint してはいけません。
+インポート、アップロード、検索、コピー、エクスポート、データベース書き込みでは、入力に上限を設け、内容を含まない安全なエラーを返します。ネットワークを信頼できない場合は Web UI をループバックだけで実行し、検証が成功するまで元の ZIP を残し、データベース、一時ファイル、WAL、インデックス用の十分な空き容量を確保してください。

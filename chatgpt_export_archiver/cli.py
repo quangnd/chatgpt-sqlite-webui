@@ -106,14 +106,19 @@ from .scanner import (
 )
 from .sqlite_errors import sqlite_runtime_error_code
 from .utils import compact_json, epoch_to_display, sha256_text
-from .web_db import WebIndexBuildError, acquire_writer_process_lock, create_web_indexes
+from .web_db import (
+    WebIndexBuildError,
+    acquire_writer_process_lock,
+    create_web_indexes,
+    release_writer_process_lock,
+)
 
 LOGGER = get_logger("cli")
 
 
 def _close_writer_lock_best_effort(writer_lock: Any) -> list[dict[str, str]]:
     try:
-        writer_lock.close()
+        release_writer_process_lock(writer_lock)
     except WebIndexBuildError as exc:
         return [dict(item) for item in exc.cleanup_warnings]
     return []
@@ -1121,6 +1126,7 @@ def _run_import_pipeline_locked(
                 batch_usage[name] = 0
 
         parse_started = time.perf_counter()
+        notify("json_parse_started")
         def classified_source_sessions():
             try:
                 yield from iter_source_array_sessions(source, selected)

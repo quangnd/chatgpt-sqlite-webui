@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tracemalloc
 from pathlib import Path
 from typing import Any
 
@@ -28,14 +29,18 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from chatgpt_export_archiver.db import (  # noqa: E402
+    DATABASE_SCHEMA_VERSION,
+    GENERATION_TRIGGER_DDL,
     _KNOWN_MANAGED_TRIGGER_PREDECESSORS,
     init_db,
     migrate_database,
 )
+from chatgpt_export_archiver.disk_resources import migration_capacity_plan  # noqa: E402
 from chatgpt_export_archiver.scanner import (  # noqa: E402
     _iter_json_array,
     _iter_utf8_chunks,
 )
+from chatgpt_export_archiver.exporter import export_conversations  # noqa: E402
 
 
 def _peak_rss_bytes() -> int:
@@ -67,6 +72,8 @@ def _environment() -> dict[str, Any]:
 def _base_metrics(scenario: str, fixture_sha256: str) -> dict[str, Any]:
     return {
         "scenario": scenario,
+        "measurement_mode": "performance_without_tracemalloc",
+        "performance_eligible": True,
         "environment": _environment(),
         "fixture_sha256": fixture_sha256,
         "wall_seconds": 0.0,
@@ -304,20 +311,89 @@ def _prepare_v4_database(path: Path, rows: int) -> None:
     conn.close()
 
 
-def _migration_worker(rows: int, journal_mode: str) -> dict[str, Any]:
+def _prepare_v5_database(path: Path, rows: int) -> None:
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    init_db(conn)
+    for name in GENERATION_TRIGGER_DDL:
+        if name.startswith("archive_query_generation_"):
+            conn.execute(f'DROP TRIGGER "{name}"')
+    conn.execute("DELETE FROM archive_generations WHERE name='query'")
+    conn.execute("PRAGMA user_version = 5")
+    conn.execute(
+        "INSERT INTO conversations(conversation_id,title,current_node,aggregate_hash) "
+        "VALUES ('synthetic','synthetic',?,'synthetic')",
+        (f"n{max(0, rows - 1)}",),
+    )
+    batch = 10_000
+    for start in range(0, rows, batch):
+        stop = min(rows, start + batch)
+        conn.executemany(
+            "INSERT INTO conversation_nodes("
+            "conversation_id,node_id,role,content_type,content_text,content_hash,"
+            "is_on_current_path,display_revision) "
+            "VALUES ('synthetic',?,'assistant','text','x',?,1,?)",
+            (
+                (f"n{index}", f"h{index}", f"{index + 1:032x}")
+                for index in range(start, stop)
+            ),
+        )
+    conn.commit()
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    conn.close()
+
+
+def _migration_worker(
+    rows: int, journal_mode: str, *, from_schema: int
+) -> dict[str, Any]:
+    if from_schema not in {4, 5}:
+        raise RuntimeError("unsupported_migration_benchmark_predecessor")
+    step = {
+        4: {
+            "step_class": "display_revision_rewrite_and_compatibility_scan",
+            "rewrite_expected": True,
+            "scan_expected": True,
+        },
+        5: {
+            "step_class": "query_generation_metadata_and_compatibility_scan",
+            "rewrite_expected": False,
+            "scan_expected": True,
+        },
+    }[from_schema]
+    scenario = f"migration-v{from_schema}-v{DATABASE_SCHEMA_VERSION}"
     spec = json.dumps(
-        {"scenario": "migration-v4-v5", "rows": rows, "journal_mode": journal_mode},
+        {"scenario": scenario, "rows": rows, "journal_mode": journal_mode},
         sort_keys=True,
         separators=(",", ":"),
     ).encode("ascii")
-    metrics = _base_metrics("migration-v4-v5", hashlib.sha256(spec).hexdigest())
+    metrics = _base_metrics(scenario, hashlib.sha256(spec).hexdigest())
     temporary = tempfile.TemporaryDirectory(prefix="chatgpt-archive-resource-bench-")
     root = Path(temporary.name)
     database = root / "synthetic.db"
-    _prepare_v4_database(database, max(1, rows))
+    prepare = _prepare_v4_database if from_schema == 4 else _prepare_v5_database
+    prepare(database, max(1, rows))
+    initial_database_bytes = database.stat().st_size
+    capacity_plan = migration_capacity_plan(
+        from_schema,
+        initial_database_bytes,
+        max(1, rows),
+    )
     conn = sqlite3.connect(database)
     conn.row_factory = sqlite3.Row
-    conn.execute(f"PRAGMA journal_mode = {journal_mode}")
+    actual_journal_mode = str(
+        conn.execute(f"PRAGMA journal_mode = {journal_mode}").fetchone()[0]
+    ).upper()
+    metrics.update(
+        {
+            "from_schema": from_schema,
+            "to_schema": DATABASE_SCHEMA_VERSION,
+            **step,
+            "estimated_peak_class": capacity_plan["estimated_peak_category"],
+            "journal_mode": actual_journal_mode,
+            "row_count": max(1, rows),
+            "capacity_plan": capacity_plan,
+        }
+    )
     sql_statements = 0
     vm_callbacks = 0
     wal_peak = 0
@@ -368,6 +444,9 @@ def _migration_worker(rows: int, journal_mode: str) -> dict[str, Any]:
             "wal_peak_bytes": wal_peak,
             "temp_peak_bytes": max(temp_peak, _tree_bytes(root)),
         }
+    )
+    metrics["actual_db_growth_bytes"] = max(
+        0, database.stat().st_size - initial_database_bytes
     )
     metrics["sqlite"].update(
         {"sql_statements": sql_statements, "vm_steps_approx": vm_callbacks * 1_000}
@@ -549,7 +628,61 @@ def _display_insert_worker(rows: int, journal_mode: str) -> dict[str, Any]:
     return metrics
 
 
+def _export_io_worker(rows: int) -> dict[str, Any]:
+    rows = max(1, rows)
+    spec = f"export-io:{rows}".encode("ascii")
+    metrics = _base_metrics("export-io", hashlib.sha256(spec).hexdigest())
+    temporary = tempfile.TemporaryDirectory(prefix="chatgpt-archive-export-io-")
+    root = Path(temporary.name)
+    database = root / "archive.db"
+    output = root / "exports"
+    conn = sqlite3.connect(database)
+    conn.row_factory = sqlite3.Row
+    init_db(conn)
+    conn.executemany(
+        "INSERT INTO conversations(conversation_id,title,current_node,aggregate_hash) VALUES (?, 'Synthetic', ?, 'h')",
+        ((f"c{index}", f"n{index}") for index in range(rows)),
+    )
+    conn.executemany(
+        """INSERT INTO conversation_nodes(
+               conversation_id,node_id,role,content_type,content_text,content_hash,
+               is_on_current_path)
+           VALUES (?,?,'assistant','text','synthetic','h',1)""",
+        ((f"c{index}", f"n{index}") for index in range(rows)),
+    )
+    conn.commit()
+    started_wall = time.perf_counter()
+    started_cpu = time.process_time()
+    result = export_conversations(conn, output, ["txt"])
+    metrics["wall_seconds"] = time.perf_counter() - started_wall
+    metrics["cpu_seconds"] = time.process_time() - started_cpu
+    metrics["peak_rss_bytes"] = _peak_rss_bytes()
+    metrics["rows"] = rows
+    metrics["exported_conversations"] = int(result["conversations"])
+    output_paths = [path for path in output.iterdir() if path.is_file()]
+    metrics["output_files"] = len(output_paths)
+    metrics["output_bytes"] = sum(path.stat().st_size for path in output_paths)
+    metrics["storage"]["db_bytes"] = database.stat().st_size
+    metrics["storage"]["temp_peak_bytes"] = _tree_bytes(root)
+    metrics["storage"]["observable_tree_bytes_at_measurement_end"] = metrics["storage"][
+        "temp_peak_bytes"
+    ]
+    metrics["diagnostic_limitations"] = [
+        "the recorded tree size is the observable end sample, not a polled filesystem peak; "
+        "short-lived same-directory atomic candidates may make the true peak larger"
+    ]
+    conn.close()
+    metrics["cleanup"]["attempted"] = 1
+    temporary.cleanup()
+    metrics["cleanup"]["succeeded"] = int(not root.exists())
+    metrics["cleanup"]["remaining_bytes"] = _tree_bytes(root) if root.exists() else 0
+    return metrics
+
+
 def _aggregate(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    samples = [sample for sample in samples if not sample.get("worker_failed")]
+    if not samples:
+        return {"measured_samples": 0}
     def values(path: tuple[str, ...]) -> list[float]:
         result: list[float] = []
         for sample in samples:
@@ -568,20 +701,100 @@ def _aggregate(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "temp_peak_bytes": ("storage", "temp_peak_bytes"),
         "vm_steps_approx": ("sqlite", "vm_steps_approx"),
     }
-    return {
+    result = {
         name: {
             "median": statistics.median(values(path)),
             "worst": max(values(path)),
         }
         for name, path in fields.items()
     }
+    result["measured_samples"] = len(samples)
+    return result
+
+
+def _run_worker_bounded(
+    command: list[str], *, hard_seconds: float, heartbeat_seconds: float
+) -> dict[str, Any]:
+    started = time.monotonic()
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={key: value for key, value in os.environ.items() if key != "PYTHONTRACEMALLOC"},
+    )
+    deadline = started + hard_seconds
+    terminated = False
+    killed = False
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            process.terminate()
+            terminated = True
+            try:
+                stdout, stderr = process.communicate(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                killed = True
+                stdout, stderr = process.communicate(timeout=0.25)
+            return {
+                "worker_failed": True,
+                "hard_timeout": True,
+                "worker_pid": process.pid,
+                "worker_return_code": process.returncode,
+                "terminated": terminated,
+                "killed": killed,
+                "reaped": process.poll() is not None,
+                "stdout_present": bool(stdout),
+                "stderr_present": bool(stderr),
+                "wall_seconds": time.monotonic() - started,
+            }
+        try:
+            stdout, stderr = process.communicate(timeout=min(heartbeat_seconds, remaining))
+            break
+        except subprocess.TimeoutExpired:
+            print(
+                "resource_benchmark_heartbeat "
+                + json.dumps(
+                    {"elapsed_seconds": round(time.monotonic() - started, 3), "pid": process.pid},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+    process_fields = {
+        "hard_timeout": False,
+        "worker_pid": process.pid,
+        "worker_return_code": process.returncode,
+        "terminated": terminated,
+        "killed": killed,
+        "reaped": process.poll() is not None,
+        "stderr_present": bool(stderr),
+    }
+    if process.returncode != 0:
+        return {"worker_failed": True, **process_fields}
+    try:
+        result = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"worker_failed": True, "worker_output_invalid": True, **process_fields}
+    result["child_process"] = process_fields
+    return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--scenario",
-        choices=("json-framing", "migration-v4-v5", "display-revision-insert"),
+        choices=(
+            "json-framing",
+            "migration-v4-v5",
+            "migration-v4-v6",
+            "migration-v5-v6",
+            "display-revision-insert",
+            "export-io",
+        ),
         default="json-framing",
     )
     parser.add_argument("--size-mib", type=int, default=8)
@@ -605,7 +818,19 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--counter-self-test", action="store_true")
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--hard-child-seconds", type=float, default=3600.0)
+    parser.add_argument("--heartbeat-seconds", type=float, default=30.0)
+    parser.add_argument("--self-test-worker-delay-seconds", type=float, default=0.0, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    requested_scenario = args.scenario
+    alias_deprecated = requested_scenario == "migration-v4-v5"
+    if alias_deprecated:
+        print(
+            "WARNING: migration-v4-v5 is deprecated; this tool migrates to the "
+            "current schema, so migration-v4-v6 is executed",
+            file=sys.stderr,
+        )
+        args.scenario = "migration-v4-v6"
 
     if args.counter_self_test:
         print(json.dumps(
@@ -616,12 +841,29 @@ def main() -> int:
         return 0
 
     if args.worker:
+        if args.self_test_worker_delay_seconds > 0:
+            time.sleep(args.self_test_worker_delay_seconds)
+        inherited_tracemalloc_disabled = tracemalloc.is_tracing()
+        if inherited_tracemalloc_disabled:
+            tracemalloc.stop()
         if args.scenario == "json-framing":
             result = _json_worker(args.size_mib, args.chunk_kib, args.variant)
-        elif args.scenario == "migration-v4-v5":
-            result = _migration_worker(max(1, args.rows), args.journal_mode)
-        else:
+        elif args.scenario == "migration-v4-v6":
+            result = _migration_worker(
+                max(1, args.rows), args.journal_mode, from_schema=4
+            )
+        elif args.scenario == "migration-v5-v6":
+            result = _migration_worker(
+                max(1, args.rows), args.journal_mode, from_schema=5
+            )
+        elif args.scenario == "display-revision-insert":
             result = _display_insert_worker(max(1, args.rows), args.journal_mode)
+        else:
+            result = _export_io_worker(max(1, args.rows))
+        result["inherited_tracemalloc_disabled"] = inherited_tracemalloc_disabled
+        result["requested_scenario"] = requested_scenario
+        result["actual_scenario"] = result["scenario"]
+        result["alias_deprecated"] = alias_deprecated
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
 
@@ -644,23 +886,27 @@ def main() -> int:
             args.journal_mode,
             "--worker",
         ]
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=True,
+        if args.self_test_worker_delay_seconds > 0:
+            command.extend(["--self-test-worker-delay-seconds", str(args.self_test_worker_delay_seconds)])
+        samples.append(
+            _run_worker_bounded(
+                command,
+                hard_seconds=args.hard_child_seconds,
+                heartbeat_seconds=args.heartbeat_seconds,
+            )
         )
-        samples.append(json.loads(completed.stdout))
     output = {
-        "schema": "chatgpt-sqlite-webui-resource-benchmark-v3",
-        "scenario": args.scenario,
+        "schema": "chatgpt-sqlite-webui-resource-benchmark-v5",
+        "scenario": samples[0].get("scenario", args.scenario),
+        "requested_scenario": requested_scenario,
+        "actual_scenario": samples[0].get("scenario", args.scenario),
+        "alias_deprecated": alias_deprecated,
         "runs": len(samples),
         "aggregate": _aggregate(samples),
         "samples": samples,
     }
     print(json.dumps(output, sort_keys=True, separators=(",", ":")))
-    return 0
+    return 1 if any(sample.get("worker_failed") for sample in samples) else 0
 
 
 if __name__ == "__main__":

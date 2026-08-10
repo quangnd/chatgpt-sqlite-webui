@@ -23,7 +23,9 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import tracemalloc
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -41,6 +43,41 @@ from chatgpt_export_archiver.scanner import (  # noqa: E402
 
 READ_CHUNK = 1024 * 1024
 TERMINAL_JOB_STATES = {"succeeded", "failed", "postcheck_failed"}
+
+
+class HardRunTimeout(RuntimeError):
+    pass
+
+
+def _hard_remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise HardRunTimeout("hard_timeout")
+    return remaining
+
+
+def _untraced_environment(**updates: str) -> dict[str, str]:
+    """Build a child environment whose timing is not polluted by parent tracing."""
+
+    env = os.environ.copy()
+    env.pop("PYTHONTRACEMALLOC", None)
+    env.update(updates)
+    return env
+
+
+def _evaluate_acceptance(
+    metrics: dict[str, Any], *, max_pipeline_seconds: float
+) -> None:
+    pipeline_wall = metrics.get("required_pipeline_wall_seconds")
+    metrics["performance_pass"] = bool(
+        metrics.get("pipeline_success")
+        and not metrics.get("hard_timeout")
+        and isinstance(pipeline_wall, (int, float))
+        and float(pipeline_wall) <= max_pipeline_seconds
+    )
+    metrics["success"] = bool(
+        metrics.get("correctness_pass") and metrics["performance_pass"]
+    )
 
 
 def _sha256(path: Path) -> str:
@@ -97,25 +134,53 @@ def _request_json(
     path: str,
     *,
     timeout: float = 30.0,
+    hard_deadline: float | None = None,
 ) -> tuple[int, Any]:
+    deadline = hard_deadline or (time.monotonic() + timeout)
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     try:
+        headers = {
+            "Accept": "application/json",
+            "Host": f"127.0.0.1:{port}",
+        }
+        if method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+            headers.update({
+                "Origin": f"http://127.0.0.1:{port}",
+                "Sec-Fetch-Site": "same-origin",
+            })
+        _apply_connection_deadline(connection, deadline)
         connection.request(
             method,
             path,
-            headers={
-                "Accept": "application/json",
-                "Host": f"127.0.0.1:{port}",
-            },
+            headers=headers,
         )
+        _hard_remaining(deadline)
+        _apply_connection_deadline(connection, deadline)
         response = connection.getresponse()
-        payload = response.read()
+        _hard_remaining(deadline)
+        parts: list[bytes] = []
+        while True:
+            _apply_connection_deadline(connection, deadline)
+            chunk = response.read(64 * 1024)
+            _hard_remaining(deadline)
+            if not chunk:
+                break
+            parts.append(chunk)
+        payload = b"".join(parts)
         return response.status, json.loads(payload) if payload else None
     finally:
         connection.close()
 
 
-def _stream_upload(port: int, source: Path) -> tuple[dict[str, Any], float]:
+def _stream_upload(
+    port: int,
+    source: Path,
+    *,
+    timeout_seconds: float | None = None,
+    hard_deadline: float | None = None,
+) -> tuple[dict[str, Any], float]:
+    if hard_deadline is None:
+        hard_deadline = time.monotonic() + float(timeout_seconds or 30.0)
     boundary = "chatgpt-archive-acceptance-boundary"
     preamble = (
         f"--{boundary}\r\n"
@@ -124,9 +189,12 @@ def _stream_upload(port: int, source: Path) -> tuple[dict[str, Any], float]:
     ).encode("ascii")
     suffix = f"\r\n--{boundary}--\r\n".encode("ascii")
     total = len(preamble) + source.stat().st_size + len(suffix)
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3600)
+    connection = http.client.HTTPConnection(
+        "127.0.0.1", port, timeout=max(0.01, min(3600.0, _hard_remaining(hard_deadline)))
+    )
     started = time.perf_counter()
     try:
+        _apply_connection_deadline(connection, hard_deadline)
         connection.putrequest("POST", "/api/import/upload", skip_host=True)
         connection.putheader("Host", f"127.0.0.1:{port}")
         connection.putheader("Origin", f"http://127.0.0.1:{port}")
@@ -134,14 +202,38 @@ def _stream_upload(port: int, source: Path) -> tuple[dict[str, Any], float]:
         connection.putheader("Accept", "application/json")
         connection.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
         connection.putheader("Content-Length", str(total))
+        _hard_remaining(hard_deadline)
+        _apply_connection_deadline(connection, hard_deadline)
         connection.endheaders()
+        _hard_remaining(hard_deadline)
+        _apply_connection_deadline(connection, hard_deadline)
         connection.send(preamble)
+        _hard_remaining(hard_deadline)
         with source.open("rb") as stream:
-            while chunk := stream.read(READ_CHUNK):
+            while True:
+                _hard_remaining(hard_deadline)
+                chunk = stream.read(READ_CHUNK)
+                _hard_remaining(hard_deadline)
+                if not chunk:
+                    break
+                _apply_connection_deadline(connection, hard_deadline)
                 connection.send(chunk)
+                _hard_remaining(hard_deadline)
+        _apply_connection_deadline(connection, hard_deadline)
         connection.send(suffix)
+        _hard_remaining(hard_deadline)
+        _apply_connection_deadline(connection, hard_deadline)
         response = connection.getresponse()
-        payload = response.read()
+        _hard_remaining(hard_deadline)
+        response_parts: list[bytes] = []
+        while True:
+            _apply_connection_deadline(connection, hard_deadline)
+            response_chunk = response.read(64 * 1024)
+            _hard_remaining(hard_deadline)
+            if not response_chunk:
+                break
+            response_parts.append(response_chunk)
+        payload = b"".join(response_parts)
         if response.status not in {200, 201, 202}:
             try:
                 error_payload = json.loads(payload)
@@ -170,6 +262,19 @@ def _stream_upload(port: int, source: Path) -> tuple[dict[str, Any], float]:
         connection.close()
 
 
+def _apply_connection_deadline(
+    connection: http.client.HTTPConnection,
+    hard_deadline: float,
+) -> float:
+    """Apply the remaining absolute budget to the next socket boundary."""
+
+    remaining = max(0.01, min(3600.0, _hard_remaining(hard_deadline)))
+    connection.timeout = remaining
+    if connection.sock is not None:
+        connection.sock.settimeout(remaining)
+    return remaining
+
+
 def _process_sample(pid: int) -> tuple[int, float]:
     try:
         completed = subprocess.run(
@@ -184,10 +289,10 @@ def _process_sample(pid: int) -> tuple[int, float]:
         return 0, 0.0
 
 
-def _tree_metrics(root: Path, database: Path) -> dict[str, int]:
+def _tree_metrics(root: Path, database: Path) -> dict[str, int | None]:
     total = 0
-    spool = 0
-    temp = 0
+    pipeline_input_copy = 0
+    observable_temp = 0
     for path in root.rglob("*"):
         try:
             if not path.is_file() or path.is_symlink():
@@ -197,10 +302,19 @@ def _tree_metrics(root: Path, database: Path) -> dict[str, int]:
             continue
         total += size
         name = path.name
-        if "upload" in str(path.parent) or name == "upload.zip":
-            spool += size
-        if name != database.name and not name.startswith(database.name):
-            temp += size
+        is_pipeline_input_copy = (
+            name == "upload.zip"
+            or any(part.startswith("chatgpt-archive-upload-") for part in path.parts)
+        )
+        if is_pipeline_input_copy:
+            pipeline_input_copy += size
+        if (
+            "tmp" in path.relative_to(root).parts
+            and not is_pipeline_input_copy
+            and name != database.name
+            and not name.startswith(database.name)
+        ):
+            observable_temp += size
     def size(path: Path) -> int:
         try:
             return path.stat().st_size
@@ -208,30 +322,182 @@ def _tree_metrics(root: Path, database: Path) -> dict[str, int]:
             return 0
     return {
         "workspace_bytes": total,
-        "spool_bytes": spool,
-        "db_bytes": size(database),
+        # Starlette's multipart spool may be unnamed or already unlinked and
+        # is therefore not observable through workspace traversal.
+        "upload_spool_bytes": None,
+        "pipeline_input_copy_bytes": pipeline_input_copy,
+        "database_bytes": size(database),
         "wal_bytes": size(Path(str(database) + "-wal")),
         "journal_bytes": size(Path(str(database) + "-journal")),
-        "temp_bytes": temp,
+        "observable_temp_bytes": observable_temp,
     }
 
 
-def _wait_server(port: int, process: subprocess.Popen[bytes]) -> None:
-    deadline = time.monotonic() + 60
+class _ResourceSampler:
+    """Low-overhead sampled filesystem/process diagnostics for one run."""
+
+    def __init__(
+        self,
+        root: Path,
+        database: Path,
+        process: subprocess.Popen[bytes],
+        *,
+        interval_seconds: float,
+        heartbeat_seconds: float,
+        started: float,
+    ) -> None:
+        self.root = root
+        self.database = database
+        self.process = process
+        self.interval_seconds = max(0.05, float(interval_seconds))
+        self.heartbeat_seconds = max(1.0, float(heartbeat_seconds))
+        self.started = started
+        self.stage = "pre_upload"
+        self.job_status = "not_started"
+        self.peaks: dict[str, int] = {}
+        self.entered_stages: set[str] = {self.stage}
+        self.observed_stages: set[str] = set()
+        self.sampled_stage_counts: dict[str, int] = {}
+        self.peak_rss_bytes = 0
+        self.peak_cpu_percent_sample = 0.0
+        self.samples = 0
+        self._next_heartbeat = time.monotonic() + self.heartbeat_seconds
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="real-pipeline-resource-sampler",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self.sample_now()
+        self._thread.start()
+
+    def update(self, *, stage: str | None = None, job_status: str | None = None) -> bool:
+        with self._lock:
+            changed = False
+            if stage is not None:
+                changed = changed or stage != self.stage
+                self.stage = stage
+                self.entered_stages.add(stage)
+            if job_status is not None:
+                changed = changed or job_status != self.job_status
+                self.job_status = job_status
+            return changed
+
+    def sample_now(self) -> None:
+        current = _tree_metrics(self.root, self.database)
+        rss, cpu_percent = _process_sample(self.process.pid)
+        with self._lock:
+            for key, value in current.items():
+                if value is None:
+                    continue
+                self.peaks[key] = max(self.peaks.get(key, 0), int(value))
+            self.peak_rss_bytes = max(self.peak_rss_bytes, rss)
+            self.peak_cpu_percent_sample = max(
+                self.peak_cpu_percent_sample, cpu_percent
+            )
+            self.samples += 1
+            stage = self.stage
+            self.observed_stages.add(stage)
+            self.sampled_stage_counts[stage] = self.sampled_stage_counts.get(stage, 0) + 1
+            job_status = self.job_status
+            rss_value = self.peak_rss_bytes
+            storage = dict(self.peaks)
+        now = time.monotonic()
+        if now >= self._next_heartbeat:
+            print(
+                "acceptance_heartbeat "
+                + json.dumps(
+                    {
+                        "elapsed_seconds": round(now - self.started, 3),
+                        "stage": stage,
+                        "job_status": job_status,
+                        "rss_bytes": rss_value,
+                        "sampled_storage_bytes": storage,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+            self._next_heartbeat = now + self.heartbeat_seconds
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            self.sample_now()
+
+    def stop(self, *, hard_deadline: float | None = None) -> dict[str, Any]:
+        self.sample_now()
+        self._stop.set()
+        join_budget = max(0.01, self.interval_seconds * 4)
+        if hard_deadline is not None:
+            join_budget = max(0.01, min(join_budget, hard_deadline - time.monotonic()))
+        self._thread.join(timeout=join_budget)
+        thread_alive = self._thread.is_alive()
+        with self._lock:
+            peaks = dict(self.peaks)
+            samples = self.samples
+            peak_rss = self.peak_rss_bytes
+            peak_cpu = self.peak_cpu_percent_sample
+            entered_stages = sorted(self.entered_stages)
+            observed_stages = sorted(self.observed_stages)
+            sampled_stage_counts = dict(sorted(self.sampled_stage_counts.items()))
+        required_stages = {"pre_upload", "upload", "server_shutdown", "required_cleanup"}
+        return {
+            "sampling_interval_seconds": self.interval_seconds,
+            "sample_count": samples,
+            "sampled_peaks": peaks,
+            "peak_rss_bytes": peak_rss,
+            "peak_cpu_percent_sample": peak_cpu,
+            "entered_stages": entered_stages,
+            "observed_stages": observed_stages,
+            "sampled_stage_counts": sampled_stage_counts,
+            "coverage_complete": required_stages.issubset(observed_stages) and not thread_alive,
+            "sampler_thread_alive": thread_alive,
+            "sampler_cleanup_failed": thread_alive,
+            "web_index_live_bytes": None,
+            "web_index_staging_bytes": None,
+            "sqlite_unlinked_temp_bytes": None,
+            "unobservable": [
+                "web index live/staging objects share the SQLite database file",
+                "SQLite may unlink TEMP files while they are open",
+                "multipart spool bytes are reported by the upload route when observable, not inferred from upload.zip",
+            ],
+        }
+
+
+def _wait_server(
+    port: int,
+    process: subprocess.Popen[bytes],
+    *,
+    hard_deadline: float,
+) -> None:
+    deadline = min(time.monotonic() + 60, hard_deadline)
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise RuntimeError("production_server_exited")
         try:
-            status, _payload = _request_json(port, "GET", "/api/health", timeout=2)
+            status, _payload = _request_json(
+                port,
+                "GET",
+                "/api/health",
+                timeout=min(2.0, max(0.01, hard_deadline - time.monotonic())),
+                hard_deadline=hard_deadline,
+            )
             if status in {200, 409, 503}:
                 return
         except (OSError, ValueError, json.JSONDecodeError):
             pass
-        time.sleep(0.1)
+        time.sleep(min(0.1, max(0.0, hard_deadline - time.monotonic())))
+    if time.monotonic() >= hard_deadline:
+        raise HardRunTimeout("hard_timeout")
     raise RuntimeError("production_server_start_timeout")
 
 
-def _bounded_smoke(port: int) -> dict[str, Any]:
+def _bounded_smoke(port: int, *, hard_deadline: float) -> dict[str, Any]:
     results: dict[str, Any] = {}
     for name, path in (
         ("health", "/api/health"),
@@ -239,11 +505,24 @@ def _bounded_smoke(port: int) -> dict[str, Any]:
         ("schema", "/api/schema"),
         ("suggest", "/api/search/suggest?q=&limit=1"),
     ):
-        status, payload = _request_json(port, "GET", path)
+        remaining = hard_deadline - time.monotonic()
+        if remaining <= 0:
+            raise HardRunTimeout("hard_timeout")
+        status, payload = _request_json(
+            port, "GET", path, timeout=min(30.0, remaining), hard_deadline=hard_deadline
+        )
         results[name] = {"status": status, "json_object": isinstance(payload, dict)}
         if status != 200:
             raise RuntimeError(f"{name}_smoke_failed")
-    status, page = _request_json(port, "GET", "/api/conversations?limit=1&offset=0")
+    remaining = hard_deadline - time.monotonic()
+    if remaining <= 0:
+        raise HardRunTimeout("hard_timeout")
+    status, page = _request_json(
+        port,
+        "GET",
+        "/api/conversations?limit=1&offset=0",
+        timeout=min(30.0, remaining), hard_deadline=hard_deadline,
+    )
     if status != 200 or not isinstance(page, dict):
         raise RuntimeError("list_smoke_failed")
     items = page.get("items")
@@ -265,7 +544,12 @@ def _bounded_smoke(port: int) -> dict[str, Any]:
                 f"/api/search/messages?{encoded}&q=&limit=1&offset=0&count_total=false",
             ),
         ):
-            item_status, payload = _request_json(port, "GET", path)
+            remaining = hard_deadline - time.monotonic()
+            if remaining <= 0:
+                raise HardRunTimeout("hard_timeout")
+            item_status, payload = _request_json(
+                port, "GET", path, timeout=min(30.0, remaining), hard_deadline=hard_deadline
+            )
             results[name] = {
                 "status": item_status,
                 "json_object": isinstance(payload, dict),
@@ -275,20 +559,134 @@ def _bounded_smoke(port: int) -> dict[str, Any]:
     return results
 
 
+def _stop_process_bounded(
+    process: subprocess.Popen[bytes], hard_deadline: float
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "attempted": True,
+        "complete": process.poll() is not None,
+        "terminated": False,
+        "killed": False,
+        "reaped": process.poll() is not None,
+    }
+    if process.poll() is None:
+        process.send_signal(signal.SIGTERM)
+        result["terminated"] = True
+        try:
+            process.wait(
+                timeout=max(0.01, min(5.0, hard_deadline - time.monotonic()))
+            )
+        except subprocess.TimeoutExpired:
+            process.kill()
+            result["killed"] = True
+            try:
+                process.wait(
+                    timeout=max(0.01, min(1.0, hard_deadline - time.monotonic()))
+                )
+            except subprocess.TimeoutExpired:
+                pass
+    result["complete"] = process.poll() is not None
+    result["reaped"] = result["complete"]
+    result["return_code"] = process.poll()
+    return result
+
+
+def _remove_tree_bounded(
+    path: Path,
+    *,
+    hard_deadline: float,
+    delay_seconds: float = 0.0,
+    force_failure: bool = False,
+) -> dict[str, Any]:
+    """Remove one exact owned tree in a killable subprocess."""
+
+    result: dict[str, Any] = {
+        "attempted": True,
+        "complete": False,
+        "terminated": False,
+        "killed": False,
+        "reaped": False,
+        "remaining_path": path.exists(),
+    }
+    if force_failure:
+        result["error_type"] = "PermissionError"
+        return result
+    remaining = hard_deadline - time.monotonic()
+    if remaining <= 0:
+        result["deadline_exhausted_before_cleanup"] = True
+        return result
+    script = (
+        "import pathlib,shutil,sys,time;"
+        "time.sleep(float(sys.argv[2]));"
+        "shutil.rmtree(pathlib.Path(sys.argv[1]))"
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", script, str(path), str(max(0.0, delay_seconds))],
+        cwd=ROOT,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=_worker_environment_for_cleanup(),
+    )
+    result["pid"] = process.pid
+    try:
+        process.wait(timeout=max(0.01, hard_deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        result["terminated"] = True
+        try:
+            process.wait(timeout=max(0.01, min(0.25, hard_deadline - time.monotonic())))
+        except subprocess.TimeoutExpired:
+            process.kill()
+            result["killed"] = True
+            try:
+                process.wait(timeout=0.05)
+            except subprocess.TimeoutExpired:
+                pass
+    result["return_code"] = process.poll()
+    result["reaped"] = process.poll() is not None
+    result["remaining_path"] = path.exists()
+    result["complete"] = bool(
+        result["reaped"] and process.returncode == 0 and not result["remaining_path"]
+    )
+    if process.poll() not in {None, 0} and "error_type" not in result:
+        result["error_type"] = "CleanupSubprocessError"
+    return result
+
+
+def _worker_environment_for_cleanup() -> dict[str, str]:
+    env = os.environ.copy()
+    env.pop("PYTHONTRACEMALLOC", None)
+    return env
+
+
 def _run_once(
     source: Path,
     python: Path,
     run_number: int,
     *,
-    max_job_seconds: float,
+    max_pipeline_seconds: float,
+    hard_run_seconds: float,
+    sample_interval_seconds: float,
+    heartbeat_seconds: float,
     force_cleanup_failure: bool = False,
+    cleanup_delay_seconds: float = 0.0,
 ) -> dict[str, Any]:
+    external_started = time.perf_counter()
+    hard_deadline = time.monotonic() + hard_run_seconds
+    inherited_tracemalloc_disabled = tracemalloc.is_tracing()
+    if inherited_tracemalloc_disabled:
+        tracemalloc.stop()
+    pipeline_started: float | None = None
     workspace = Path(tempfile.mkdtemp(prefix="chatgpt-real-pipeline-"))
     database = workspace / "fresh.db"
     temp_root = workspace / "tmp"
     temp_root.mkdir()
     log_path = workspace / "server.log"
     process: subprocess.Popen[bytes] | None = None
+    sampler: _ResourceSampler | None = None
+    port: int | None = None
+    job_id: str | None = None
     before_children = resource.getrusage(resource.RUSAGE_CHILDREN)
     metrics: dict[str, Any] = {
         "run": run_number,
@@ -297,7 +695,23 @@ def _run_once(
         "cleanup_success": False,
         "correctness_pass": False,
         "performance_pass": False,
+        "hard_timeout": False,
         "cleanup": {"attempted": True, "complete": False},
+        "server_shutdown": {"attempted": False, "complete": False},
+        "timing_semantics": {
+            "job_elapsed_seconds": "server job snapshot only",
+            "workload_wall_seconds": "upload start through terminal job and bounded smoke checks",
+            "required_pipeline_wall_seconds": "upload start through required server shutdown and required cleanup attempt",
+            "external_process_wall_seconds": "inspect, preflight, server lifecycle, workload, shutdown, and cleanup",
+            "formal_threshold": "required_pipeline_wall_seconds",
+        },
+        "instrumentation": {
+            "measurement_mode": "performance_without_tracemalloc",
+            "inherited_tracemalloc_disabled": inherited_tracemalloc_disabled,
+            "hard_run_seconds": hard_run_seconds,
+            "sample_interval_seconds": sample_interval_seconds,
+            "heartbeat_seconds": heartbeat_seconds,
+        },
     }
     try:
         inspect_before = _identity(source)
@@ -315,8 +729,9 @@ def _run_once(
             cwd=ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env={**os.environ, "TMPDIR": str(temp_root)},
+            env=_untraced_environment(TMPDIR=str(temp_root)),
             check=False,
+            timeout=_hard_remaining(hard_deadline),
         )
         metrics["inspect_seconds"] = time.perf_counter() - inspect_started
         metrics["inspect_exit_code"] = inspected.returncode
@@ -358,11 +773,10 @@ def _run_once(
 
         upload_before = _identity(source)
         port = _free_port()
-        env = {
-            **os.environ,
-            "TMPDIR": str(temp_root),
-            "PYTHONUNBUFFERED": "1",
-        }
+        env = _untraced_environment(
+            TMPDIR=str(temp_root),
+            PYTHONUNBUFFERED="1",
+        )
         log_stream = log_path.open("wb")
         try:
             process = subprocess.Popen(
@@ -386,32 +800,54 @@ def _run_once(
             )
         finally:
             log_stream.close()
-        _wait_server(port, process)
-        total_started = time.perf_counter()
-        job, upload_seconds = _stream_upload(port, source)
+        _wait_server(port, process, hard_deadline=hard_deadline)
+        pipeline_started = time.perf_counter()
+        sampler = _ResourceSampler(
+            workspace,
+            database,
+            process,
+            interval_seconds=sample_interval_seconds,
+            heartbeat_seconds=heartbeat_seconds,
+            started=pipeline_started,
+        )
+        sampler.start()
+        sampler.update(stage="upload", job_status="uploading")
+        sampler.sample_now()
+        try:
+            job, upload_seconds = _stream_upload(
+                port,
+                source,
+                hard_deadline=hard_deadline,
+            )
+        except (TimeoutError, socket.timeout) as exc:
+            if time.monotonic() >= hard_deadline:
+                raise HardRunTimeout("hard_timeout") from exc
+            raise
         metrics["upload_seconds"] = upload_seconds
         job_id = job["job_id"]
-        peaks = _tree_metrics(workspace, database)
-        peak_rss = 0
-        peak_cpu_percent = 0.0
-        deadline = time.monotonic() + 24 * 60 * 60
-        while time.monotonic() < deadline:
+        sampler.update(stage="job_poll", job_status=str(job.get("status", "queued")))
+        sampler.sample_now()
+        while True:
+            remaining = _hard_remaining(hard_deadline)
             status, snapshot = _request_json(
-                port, "GET", f"/api/import/jobs/{job_id}", timeout=30
+                port,
+                "GET",
+                f"/api/import/jobs/{job_id}",
+                timeout=min(30.0, remaining),
+                hard_deadline=hard_deadline,
             )
             if status != 200 or not isinstance(snapshot, dict):
                 raise RuntimeError("job_poll_failed")
-            rss, cpu_percent = _process_sample(process.pid)
-            peak_rss = max(peak_rss, rss)
-            peak_cpu_percent = max(peak_cpu_percent, cpu_percent)
-            current = _tree_metrics(workspace, database)
-            peaks = {key: max(peaks.get(key, 0), value) for key, value in current.items()}
+            stage_changed = sampler.update(
+                stage=str(snapshot.get("stage") or "job_poll"),
+                job_status=str(snapshot.get("status") or "unknown"),
+            )
+            if stage_changed:
+                sampler.sample_now()
             if snapshot.get("status") in TERMINAL_JOB_STATES:
                 job = snapshot
                 break
-            time.sleep(0.25)
-        else:
-            raise RuntimeError("job_timeout")
+            time.sleep(min(0.25, max(0.0, hard_deadline - time.monotonic())))
         if job.get("status") != "succeeded":
             raise RuntimeError(str(job.get("error_code") or "production_job_failed"))
         upload_after = _identity(source)
@@ -434,75 +870,143 @@ def _run_once(
             "committed_nodes": (job.get("summary") or {}).get("committed_nodes"),
             "warnings": (job.get("summary") or {}).get("warnings"),
             "web_index_status": (job.get("web_index") or {}).get("status", "built"),
+            "multipart_spool": job.get("multipart_spool"),
         }
-        metrics["smoke"] = _bounded_smoke(port)
-        metrics["wall_seconds"] = time.perf_counter() - total_started
-        metrics["peak_rss_bytes"] = peak_rss
-        metrics["peak_cpu_percent_sample"] = peak_cpu_percent
-        metrics["storage_peaks"] = peaks
+        sampler.update(stage="bounded_smoke", job_status="succeeded")
+        sampler.sample_now()
+        metrics["smoke"] = _bounded_smoke(port, hard_deadline=hard_deadline)
+        metrics["workload_wall_seconds"] = time.perf_counter() - pipeline_started
+        # Compatibility aliases retain the previous workload-only meaning.
+        metrics["pipeline_wall_seconds"] = metrics["workload_wall_seconds"]
+        metrics["wall_seconds"] = metrics["workload_wall_seconds"]
         metrics["pipeline_success"] = True
         return metrics
     except BaseException as exc:
+        hard_timeout = isinstance(exc, HardRunTimeout) or (
+            isinstance(exc, (subprocess.TimeoutExpired, TimeoutError, socket.timeout))
+            and time.monotonic() >= hard_deadline
+        )
+        if hard_timeout:
+            metrics["hard_timeout"] = True
         metrics["error_code"] = (
-            str(exc)
+            "hard_timeout"
+            if hard_timeout
+            else str(exc)
             if isinstance(exc, RuntimeError)
             and str(exc).replace("_", "").isalnum()
             else type(exc).__name__
         )
         return metrics
     finally:
-        if process is not None and process.poll() is None:
-            process.send_signal(signal.SIGTERM)
+        if pipeline_started is not None and "workload_wall_seconds" not in metrics:
+            metrics["workload_wall_seconds"] = (
+                time.perf_counter() - pipeline_started
+            )
+            metrics["pipeline_wall_seconds"] = metrics["workload_wall_seconds"]
+            metrics["wall_seconds"] = metrics["workload_wall_seconds"]
+        if metrics.get("hard_timeout") and port is not None and job_id is not None:
             try:
-                process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=10)
+                _request_json(
+                    port,
+                    "POST",
+                    f"/api/import/jobs/{job_id}/web-index/cancel",
+                    timeout=2.0,
+                )
+                metrics["hard_timeout_cancel_requested"] = True
+            except (OSError, ValueError, json.JSONDecodeError):
+                metrics["hard_timeout_cancel_requested"] = False
+        shutdown_started = time.perf_counter()
+        metrics["server_shutdown"]["attempted"] = process is not None
+        if sampler is not None:
+            sampler.update(stage="server_shutdown")
+        if process is not None:
+            metrics["server_shutdown"].update(
+                _stop_process_bounded(process, hard_deadline)
+            )
+        metrics["server_shutdown"]["seconds"] = (
+            time.perf_counter() - shutdown_started
+        )
+        if sampler is not None:
+            sampler.sample_now()
         after_children = resource.getrusage(resource.RUSAGE_CHILDREN)
         metrics["child_cpu_seconds"] = max(
             0.0,
             (after_children.ru_utime + after_children.ru_stime)
             - (before_children.ru_utime + before_children.ru_stime),
         )
-        cleanup_error: str | None = None
-        try:
-            if force_cleanup_failure:
-                raise PermissionError("synthetic cleanup fault")
-            shutil.rmtree(workspace)
-        except OSError as exc:
-            cleanup_error = type(exc).__name__
-        metrics["cleanup"]["complete"] = (
-            cleanup_error is None and not workspace.exists()
+        cleanup_started = time.perf_counter()
+        if sampler is not None:
+            sampler.update(stage="required_cleanup")
+            sampler.sample_now()
+            resource_metrics = sampler.stop(hard_deadline=hard_deadline)
+            metrics["resource_sampler"] = resource_metrics
+            metrics["peak_rss_bytes"] = resource_metrics["peak_rss_bytes"]
+            metrics["peak_cpu_percent_sample"] = resource_metrics[
+                "peak_cpu_percent_sample"
+            ]
+            metrics["storage_peaks"] = resource_metrics["sampled_peaks"]
+        cleanup_result = _remove_tree_bounded(
+            workspace,
+            hard_deadline=hard_deadline,
+            delay_seconds=cleanup_delay_seconds,
+            force_failure=force_cleanup_failure,
         )
+        metrics["cleanup"].update(cleanup_result)
         metrics["cleanup_success"] = bool(metrics["cleanup"]["complete"])
-        if cleanup_error is not None:
-            metrics["cleanup"]["error_type"] = cleanup_error
+        metrics["cleanup"]["seconds"] = time.perf_counter() - cleanup_started
+        if pipeline_started is not None:
+            metrics["required_pipeline_wall_seconds"] = (
+                time.perf_counter() - pipeline_started
+            )
+        if time.monotonic() >= hard_deadline:
+            metrics["hard_timeout"] = True
+            metrics.setdefault("error_code", "hard_timeout")
         metrics["correctness_pass"] = bool(
-            metrics.get("pipeline_success") and metrics["cleanup_success"]
-        )
-        elapsed = (metrics.get("job") or {}).get("elapsed_seconds")
-        metrics["performance_pass"] = bool(
             metrics.get("pipeline_success")
-            and isinstance(elapsed, (int, float))
-            and float(elapsed) <= max_job_seconds
+            and metrics["cleanup_success"]
+            and metrics["server_shutdown"].get("complete")
+            and not (metrics.get("resource_sampler") or {}).get("sampler_cleanup_failed")
+            and not metrics.get("hard_timeout")
         )
-        metrics["success"] = bool(
-            metrics["correctness_pass"] and metrics["performance_pass"]
+        metrics["external_process_wall_seconds"] = (
+            time.perf_counter() - external_started
         )
-        if workspace.exists():
-            shutil.rmtree(workspace, ignore_errors=True)
+        metrics["external_wall_seconds"] = metrics[
+            "external_process_wall_seconds"
+        ]
+        _evaluate_acceptance(
+            metrics,
+            max_pipeline_seconds=max_pipeline_seconds,
+        )
 
 
 def _aggregate(samples: list[dict[str, Any]]) -> dict[str, Any]:
-    successful = [sample for sample in samples if sample.get("success")]
-    fields = ("wall_seconds", "upload_seconds", "peak_rss_bytes", "child_cpu_seconds")
-    result: dict[str, Any] = {"successful_runs": len(successful)}
+    fields = (
+        "workload_wall_seconds",
+        "required_pipeline_wall_seconds",
+        "external_process_wall_seconds",
+        "pipeline_wall_seconds",
+        "external_wall_seconds",
+        "upload_seconds",
+        "peak_rss_bytes",
+        "child_cpu_seconds",
+    )
+    result: dict[str, Any] = {
+        "total_runs": len(samples),
+        "successful_runs": sum(bool(sample.get("success")) for sample in samples),
+    }
     for field in fields:
-        values = [float(sample[field]) for sample in successful if field in sample]
+        all_values = [
+            float(sample[field]) if isinstance(sample.get(field), (int, float)) else None
+            for sample in samples
+        ]
+        values = [value for value in all_values if value is not None]
         result[field] = {
             "median": statistics.median(values) if values else None,
             "worst": max(values) if values else None,
-            "all": values,
+            "all": all_values,
+            "sample_count": len(samples),
+            "measured_count": len(values),
         }
     job_values = [
         float(sample["job"]["elapsed_seconds"])
@@ -512,7 +1016,14 @@ def _aggregate(samples: list[dict[str, Any]]) -> dict[str, Any]:
     result["job_elapsed_seconds"] = {
         "median": statistics.median(job_values) if job_values else None,
         "worst": max(job_values) if job_values else None,
-        "all": job_values,
+        "all": [
+            float(sample["job"]["elapsed_seconds"])
+            if isinstance((sample.get("job") or {}).get("elapsed_seconds"), (int, float))
+            else None
+            for sample in samples
+        ],
+        "sample_count": len(samples),
+        "measured_count": len(job_values),
     }
     result["performance_pass"] = all(
         bool(sample.get("performance_pass")) for sample in samples
@@ -528,10 +1039,36 @@ def main() -> int:
     parser.add_argument("--input", type=Path)
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument(
+        "--max-pipeline-seconds",
         "--max-job-seconds",
+        dest="max_pipeline_seconds",
         type=float,
         default=300.0,
-        help="Formal per-job performance threshold; any slower run fails acceptance.",
+        help=(
+            "Formal upload-through-server-shutdown-and-required-cleanup threshold. "
+            "--max-job-seconds is a compatibility alias."
+        ),
+    )
+    parser.add_argument(
+        "--hard-run-seconds",
+        type=float,
+        default=3600.0,
+        help=(
+            "Independent operational watchdog for a stuck run; this is not the "
+            "300-second performance threshold."
+        ),
+    )
+    parser.add_argument(
+        "--sample-interval-seconds",
+        type=float,
+        default=0.25,
+        help="Filesystem/process sampling interval for content-free peak diagnostics.",
+    )
+    parser.add_argument(
+        "--heartbeat-seconds",
+        type=float,
+        default=30.0,
+        help="Content-free progress heartbeat interval written to stderr.",
     )
     parser.add_argument(
         "--python",
@@ -553,9 +1090,19 @@ def main() -> int:
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--self-test-cleanup-delay-seconds",
+        type=float,
+        default=0.0,
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
     synthetic_root: Path | None = None
-    if args.self_test or args.self_test_cleanup_failure:
+    if (
+        args.self_test
+        or args.self_test_cleanup_failure
+        or args.self_test_cleanup_delay_seconds > 0
+    ):
         synthetic_root = Path(tempfile.mkdtemp(prefix="chatgpt-harness-selftest-"))
         source = synthetic_root / "synthetic.zip"
         payload = [
@@ -591,24 +1138,42 @@ def main() -> int:
         source = args.input.expanduser().resolve()
     if not source.is_file() or source.is_symlink():
         parser.error("--input must be a regular ZIP file")
-    if not isinstance(args.max_job_seconds, float) or args.max_job_seconds < 0:
-        parser.error("--max-job-seconds must be nonnegative")
+    if (
+        not isinstance(args.max_pipeline_seconds, float)
+        or args.max_pipeline_seconds < 0
+    ):
+        parser.error("--max-pipeline-seconds must be nonnegative")
+    if args.hard_run_seconds <= 0:
+        parser.error("--hard-run-seconds must be positive")
+    if args.sample_interval_seconds <= 0:
+        parser.error("--sample-interval-seconds must be positive")
+    if args.heartbeat_seconds <= 0:
+        parser.error("--heartbeat-seconds must be positive")
+    if args.self_test_cleanup_delay_seconds < 0:
+        parser.error("--self-test-cleanup-delay-seconds must be nonnegative")
     try:
         samples = [
             _run_once(
                 source,
                 args.python.expanduser().resolve(),
                 run_number,
-                max_job_seconds=args.max_job_seconds,
+                max_pipeline_seconds=args.max_pipeline_seconds,
+                hard_run_seconds=args.hard_run_seconds,
+                sample_interval_seconds=args.sample_interval_seconds,
+                heartbeat_seconds=args.heartbeat_seconds,
                 force_cleanup_failure=args.self_test_cleanup_failure,
+                cleanup_delay_seconds=args.self_test_cleanup_delay_seconds,
             )
             for run_number in range(1, max(1, args.runs) + 1)
         ]
     finally:
         if synthetic_root is not None:
-            shutil.rmtree(synthetic_root, ignore_errors=True)
+            _remove_tree_bounded(
+                synthetic_root,
+                hard_deadline=time.monotonic() + 5.0,
+            )
     output = {
-        "schema": "chatgpt-sqlite-webui-real-pipeline-v1",
+        "schema": "chatgpt-sqlite-webui-real-pipeline-v3",
         "environment": {
             "platform": platform.platform(),
             "python": platform.python_version(),

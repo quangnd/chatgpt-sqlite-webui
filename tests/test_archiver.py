@@ -837,7 +837,7 @@ class ArchiverTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         self.assertIn("python_resolution ok", result.stdout)
 
-    def test_readme_command_blocks_and_valid_conversations_note_stay_synchronized(self):
+    def test_readmes_stay_concise_and_synchronized(self):
         root = Path(__file__).resolve().parents[1]
         readmes = [
             root / "README.md",
@@ -846,12 +846,10 @@ class ArchiverTests(unittest.TestCase):
             root / "README.ja-JP.md",
             root / "README.es-ES.md",
         ]
-        command_blocks = []
-        heading_shapes = []
+        fenced_blocks = []
+        document_shapes = []
         env_names = []
         common_required = [
-            "CHATGPT_ARCHIVE_ALLOW_REMOTE_UPLOADS",
-            "CHATGPT_ARCHIVE_ALLOW_REMOTE_ACCESS",
             "CHATGPT_ARCHIVE_REMOTE_UPLOAD_PROFILE",
             "CHATGPT_ARCHIVE_MAX_UPLOAD_BYTES",
             "CHATGPT_ARCHIVE_MAX_UPLOAD_JSON_MEMBER_BYTES",
@@ -859,115 +857,64 @@ class ArchiverTests(unittest.TestCase):
             "CHATGPT_ARCHIVE_MAX_UPLOAD_TOTAL_UNCOMPRESSED_BYTES",
             "CHATGPT_ARCHIVE_MAX_UPLOAD_COMPRESSION_RATIO",
             "CHATGPT_ARCHIVE_MAX_UPLOAD_TOTAL_MEMBERS",
+            "CHATGPT_ARCHIVE_ALLOW_REMOTE_UPLOADS",
             "100,000",
-            "10,000",
-            "raw_text",
             "web-index",
             "webui/dist",
-            "webui/src",
-            "webui/tests",
-            "webui/scripts",
-            "webui/node_modules",
-            "webui/tsconfig.tsbuildinfo",
-            "message_fts",
-            "optional_message_fts_error",
-            "database_malformed",
-            "database_locked",
-            "database_readonly",
-            "database_io_error",
-            "database_runtime_failure",
-            "web_message_norm",
-            "web_title_norm",
-            "web_message_trigram",
-            "web_title_trigram",
-            "legacy raw FTS",
-            "candidate backend",
-            "normalized title scan",
-            "full scan",
-            "remote-safe",
-            "200.0",
-            "1000.0",
-            "PRAGMA user_version",
             "database_migration_required",
-            "upload_preflight_failed",
-            "invalid_conversation_encoding",
-            "json_integer_too_large",
-            "source_read_failed",
-            "cleanup_warnings",
-            "display_text",
-            "/api/schema",
-            "current-path node",
             "--input conversations.json",
             "--input ./extracted-export/",
             "conversations-*.json",
-            "scanner discovery",
-            ".DS_Store",
-            "around_node_id",
-            "visible-only rows",
-            "effective all-node collection",
-            "current_collection_source",
-            "current_path_fallback_to_all",
-            "constraints-web-py312.txt",
-            "requirements-web-py312-macos-arm64.lock",
-            "Content-Length",
+            "constraints-web-py313.txt",
             "Cmd/Ctrl+F",
-            "normalized contains",
-            "path:",
-            "scope:",
-            "CON",
-            "COM¹",
-            "LPT²",
-            "._*",
-            "__MACOSX",
-            "conversations*.json",
-            "*.jsonl",
-            "*.zip",
-            "archive/",
-            "exports/",
-            "ZIP64",
             "WAL",
-            "/web-index/cancel",
-            "--allowed-hosts",
-            "--trusted-proxies",
-            "Sec-Fetch-Site: cross-site",
-            "staging",
         ]
-        localized_required = {
-            "README.md": ["Copy current path conversation", "Copy visible", "bounded larger raw preview", "current reader path", "conversation-level"],
-            "README.zh-CN.md": ["复制当前路径整段对话", "复制当前可见", "有上限的较大 raw 预览", "当前 reader 路径", "conversation-level"],
-            "README.zh-TW.md": ["複製目前路徑整段對話", "複製目前可見", "有上限的較大 raw 預覽", "目前 reader 路徑", "conversation-level"],
-            "README.ja-JP.md": ["現在のパスの会話をコピー", "表示中をコピー", "上限付きの大きな raw プレビュー", "現在の reader パス", "conversation-level"],
-            "README.es-ES.md": ["Copiar conversación de la ruta actual", "Copiar visibles", "vista previa raw ampliada con límite", "ruta actual del reader", "nivel conversación"],
-        }
-        banned_raw_promises = [
-            "raw" + "TooLarge",
-            "load" + "FullRaw",
-            "full raw " + "JSON",
-            "Full raw " + "JSON",
-            "完整 raw " + "JSON",
-            "完全な raw " + "JSON",
-            "raw " + "JSON completo",
-            "complete raw " + "payload",
-            "完整原始" + "载荷",
-        ]
+        banned_version_language = re.compile(
+            r"本版本|当前版本|目前版本|较前版|較前版|上一版|本轮|本輪|"
+            r"\bround[0-9_-]*\b|\bthis (?:release|version|round)\b|"
+            r"\b(?:current|previous) version\b|\bprevious release\b|"
+            r"esta versi[oó]n|versi[oó]n (?:actual|anterior)|esta ronda|ronda anterior|"
+            r"このリリース|現行バージョン|前バージョン|今回の修正",
+            re.IGNORECASE,
+        )
+
+        def document_shape(text):
+            parts = re.split(r"(```[^\n]*\n.*?\n```)", text, flags=re.S)
+            shape = []
+            for part in parts:
+                if not part:
+                    continue
+                if part.startswith("```"):
+                    shape.append(("code", part.splitlines()[0]))
+                    continue
+                for block in re.split(r"\n\n+", part.strip()):
+                    lines = block.splitlines()
+                    if not lines:
+                        continue
+                    if lines[0].startswith("#"):
+                        shape.append(("heading", len(lines[0]) - len(lines[0].lstrip("#"))))
+                    elif all(line.startswith("- ") for line in lines):
+                        shape.append(("list", len(lines)))
+                    elif all(line.startswith("|") for line in lines):
+                        shape.append(("table", len(lines)))
+                    else:
+                        shape.append(("paragraph", 1))
+            return shape
+
         for path in readmes:
             text = path.read_text(encoding="utf-8")
-            command_blocks.append(re.findall(r"```bash\n(.*?)\n```", text, flags=re.S))
-            heading_shapes.append(re.findall(r"^(#{1,4})\s+", text, flags=re.M))
+            fenced_blocks.append(re.findall(r"```[^\n]*\n.*?\n```", text, flags=re.S))
+            document_shapes.append(document_shape(text))
             env_names.append(sorted(set(re.findall(r"CHATGPT_ARCHIVE_[A-Z0-9_]+", text))))
             for literal in common_required:
                 self.assertIn(literal.lower(), text.lower(), f"{path.name} missing {literal}")
-            for literal in localized_required[path.name]:
-                self.assertIn(literal, text, f"{path.name} missing localized fact {literal}")
-            for literal in banned_raw_promises:
-                self.assertNotIn(literal, text, f"{path.name} should not retain old raw promise {literal}")
-            self.assertIn("valid_conversations", text)
-            self.assertIn("inserted_conversations", text)
-            self.assertIn("updated_conversations", text)
-            self.assertIn("unchanged_conversations", text)
+            self.assertIsNone(
+                banned_version_language.search(text),
+                f"{path.name} contains release-comparison language",
+            )
+            self.assertLessEqual(len(text.splitlines()), 400, f"{path.name} is too long")
             self.assertIn("clean_generated_artifacts.py", text)
             self.assertIn("--fail-on-blocked", text)
-            self.assertIn("py -3 tools/clean_generated_artifacts.py", text)
             self.assertIn("set NEW_ZIP=%USERPROFILE%", text)
             self.assertIn('"%NEW_ZIP%"', text)
             self.assertIn("sqlite", text.lower())
@@ -991,8 +938,9 @@ class ArchiverTests(unittest.TestCase):
             lowered = text.lower()
             self.assertIn("windows", lowered)
             self.assertIn("powershell", lowered)
-        self.assertTrue(all(blocks == command_blocks[0] for blocks in command_blocks[1:]))
-        self.assertTrue(all(shape == heading_shapes[0] for shape in heading_shapes[1:]))
+        self.assertEqual(len(fenced_blocks[0]), 38)
+        self.assertTrue(all(blocks == fenced_blocks[0] for blocks in fenced_blocks[1:]))
+        self.assertTrue(all(shape == document_shapes[0] for shape in document_shapes[1:]))
         self.assertTrue(all(names == env_names[0] for names in env_names[1:]))
 
     def test_stdout_backslashreplace_avoids_unicode_encode_error(self):
@@ -3128,7 +3076,7 @@ class ArchiverTests(unittest.TestCase):
         os.environ.get("CHATGPT_ARCHIVE_ROUND7_SCALE_TEST") == "1",
         "set CHATGPT_ARCHIVE_ROUND7_SCALE_TEST=1 for the million-conversation acceptance",
     )
-    def test_round7_archive_export_one_million_conversation_production_path(self):
+    def test_round7_archive_export_one_million_allocation_control_flow_diagnostic(self):
         from chatgpt_export_archiver import exporter
 
         with tempfile.TemporaryDirectory() as td:
@@ -3746,7 +3694,8 @@ class ArchiverTests(unittest.TestCase):
             required = [
                 "README.md", "README.zh-CN.md", "README.zh-TW.md", "README.ja-JP.md", "README.es-ES.md",
                 "requirements-web.txt", "constraints-web-py312.txt",
-                "requirements-web-py312-macos-arm64.lock", "LICENSE", "AGENTS.md", "chatgpt_archive.py",
+                "constraints-web-py313.txt", "requirements-web-py312-macos-arm64.lock",
+                "requirements-web-py313-macos-arm64.lock", "LICENSE", "AGENTS.md", "chatgpt_archive.py",
                 "chatgpt_export_archiver/search.py", "chatgpt_export_archiver/web_api.py",
                 "tests/__init__.py", "tests/test_archiver.py", "tests/test_web_api.py", "tests/test_round12.py",
                 "tools/acceptance_real_pipeline.py", "tools/acceptance_scale.py",
@@ -3759,6 +3708,7 @@ class ArchiverTests(unittest.TestCase):
             ]
             for path in required:
                 self.assertIn(path, namelist, f"missing {path}")
+            self.assertNotIn("chatgpt-sqlite-webui-audit-report.md", namelist)
             self.assertIn("manifest_files", result.stdout)
             self.assertIn("manifest_sha256", result.stdout)
             self.assertIn("dist_assets_verified", result.stdout)
@@ -7436,12 +7386,24 @@ class ArchiverTests(unittest.TestCase):
                     "raise SystemExit(4)\n"
                 )
                 contender.append(subprocess.run(
-                    [sys.executable, "-c", script, str(db)],
+                    [
+                        sys.executable,
+                        "-W",
+                        "error::ResourceWarning",
+                        "-c",
+                        script,
+                        str(db),
+                    ],
                     cwd=Path(__file__).resolve().parents[1],
                     text=True,
                     capture_output=True,
                     timeout=20,
                     check=False,
+                    env={
+                        key: value
+                        for key, value in os.environ.items()
+                        if key != "PYTHONTRACEMALLOC"
+                    },
                 ))
 
             with mock.patch.object(web_db_module, "WEB_INDEX_BUILD_LEASE_SECONDS", 0.2):
@@ -7479,11 +7441,24 @@ class ArchiverTests(unittest.TestCase):
                 "create_web_indexes(Path(sys.argv[1]), progress_callback=progress)\n"
             )
             child = subprocess.Popen(
-                [sys.executable, "-c", script, str(db), str(marker)],
+                [
+                    sys.executable,
+                    "-W",
+                    "error::ResourceWarning",
+                    "-c",
+                    script,
+                    str(db),
+                    str(marker),
+                ],
                 cwd=Path(__file__).resolve().parents[1],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env={
+                    key: value
+                    for key, value in os.environ.items()
+                    if key != "PYTHONTRACEMALLOC"
+                },
             )
             self.addCleanup(lambda: child.poll() is None and child.kill())
             deadline = time.monotonic() + 10

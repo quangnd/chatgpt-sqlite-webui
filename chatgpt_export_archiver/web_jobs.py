@@ -21,6 +21,7 @@ from .web_db import (
     WebIndexBuildError,
     acquire_writer_process_lock,
     create_web_indexes,
+    release_writer_process_lock,
 )
 
 LOGGER = get_logger("web_jobs")
@@ -69,6 +70,7 @@ class ImportJob:
     upload_path: Path
     filename: str
     size: int
+    multipart_spool: dict[str, Any] | None = None
     status: str = "queued"
     stage: str = "queued"
     created_at: float = field(default_factory=time.time)
@@ -108,6 +110,11 @@ class ImportJob:
                 "canonical_commit_succeeded": self.canonical_commit_succeeded,
                 "filename": safe_filename_part(self.filename, 120),
                 "size": self.size,
+                "multipart_spool": (
+                    dict(self.multipart_spool)
+                    if self.multipart_spool is not None
+                    else None
+                ),
                 "created_at": self.created_at,
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
@@ -199,6 +206,51 @@ class ImportJobManager:
         self._running_job_id: str | None = None
         self._pending_writer_lock: Any | None = None
 
+    def _retry_retained_writer_lock_cleanup(self) -> list[dict[str, str]]:
+        """Retry terminal/admission locks while temporarily owning the slot."""
+
+        with self._lock:
+            if self._running_job_id is not None:
+                return [{
+                    "code": "writer_process_lock_cleanup_failed",
+                    "error_type": "WriterSlotBusy",
+                    "path_kind": "process_lock",
+                }]
+            self._running_job_id = "__writer_cleanup__"
+            pending = self._pending_writer_lock
+            jobs = [
+                job for job in self._jobs.values() if job._writer_lock is not None
+            ]
+        warnings: list[dict[str, str]] = []
+        try:
+            if pending is not None:
+                try:
+                    release_writer_process_lock(pending)
+                except WebIndexBuildError as exc:
+                    warnings.extend(dict(item) for item in exc.cleanup_warnings)
+                else:
+                    with self._lock:
+                        if self._pending_writer_lock is pending:
+                            self._pending_writer_lock = None
+            for job in jobs:
+                with job._lock:
+                    writer_lock = job._writer_lock
+                if writer_lock is None:
+                    continue
+                try:
+                    release_writer_process_lock(writer_lock)
+                except WebIndexBuildError as exc:
+                    warnings.extend(dict(item) for item in exc.cleanup_warnings)
+                else:
+                    with job._lock:
+                        if job._writer_lock is writer_lock:
+                            job._writer_lock = None
+        finally:
+            with self._lock:
+                if self._running_job_id == "__writer_cleanup__":
+                    self._running_job_id = None
+        return warnings
+
     def has_running_job(self) -> bool:
         with self._lock:
             return self._running_job_id is not None
@@ -210,6 +262,8 @@ class ImportJobManager:
         release_pending_upload_slot() exactly once, or hand the slot over to
         start_import() which takes ownership.
         """
+        if self._retry_retained_writer_lock_cleanup():
+            return False
         with self._lock:
             if self._running_job_id is not None:
                 return False
@@ -225,7 +279,10 @@ class ImportJobManager:
             raise
         with self._lock:
             if self._running_job_id != "__pending_upload__":
-                writer_lock.close()
+                try:
+                    release_writer_process_lock(writer_lock)
+                except WebIndexBuildError:
+                    self._pending_writer_lock = writer_lock
                 return False
             self._pending_writer_lock = writer_lock
         return True
@@ -234,20 +291,27 @@ class ImportJobManager:
         writer_lock = None
         with self._lock:
             if self._running_job_id == "__pending_upload__":
-                self._running_job_id = None
-                writer_lock, self._pending_writer_lock = (
-                    self._pending_writer_lock,
-                    None,
-                )
+                self._running_job_id = "__writer_cleanup__"
+                writer_lock = self._pending_writer_lock
         if writer_lock is not None:
             try:
-                writer_lock.close()
+                release_writer_process_lock(writer_lock)
             except WebIndexBuildError as exc:
                 # Admission has already been released.  Return safe secondary
                 # diagnostics so the request path can preserve its primary
                 # outcome without silently discarding cleanup evidence.
-                return [dict(item) for item in exc.cleanup_warnings]
-        return []
+                warnings = [dict(item) for item in exc.cleanup_warnings]
+            else:
+                warnings = []
+                with self._lock:
+                    if self._pending_writer_lock is writer_lock:
+                        self._pending_writer_lock = None
+        else:
+            warnings = []
+        with self._lock:
+            if self._running_job_id == "__writer_cleanup__":
+                self._running_job_id = None
+        return warnings
 
     def start_import(
         self,
@@ -256,7 +320,17 @@ class ImportJobManager:
         filename: str,
         size: int,
         upload_seconds: float = 0.0,
+        multipart_spool: dict[str, Any] | None = None,
     ) -> ImportJob:
+        with self._lock:
+            retry_needed = self._running_job_id is None
+        if retry_needed:
+            retry_warnings = self._retry_retained_writer_lock_cleanup()
+            if retry_warnings:
+                raise WebIndexBuildError(
+                    "writer_process_lock_cleanup_failed",
+                    cleanup_warnings=retry_warnings,
+                )
         needs_lock = False
         with self._lock:
             self._prune_jobs_locked()
@@ -289,6 +363,9 @@ class ImportJobManager:
                 upload_path=upload_path,
                 filename=filename,
                 size=size,
+                multipart_spool=(
+                    dict(multipart_spool) if multipart_spool is not None else None
+                ),
                 _writer_lock=writer_lock,
             )
             job.stage_timings["upload"] = round(max(0.0, upload_seconds), 6)
@@ -302,17 +379,25 @@ class ImportJobManager:
             cleanup_warnings: list[dict[str, str]] = []
             with self._lock:
                 if self._running_job_id == job_id:
-                    self._running_job_id = None
+                    self._running_job_id = "__writer_cleanup__"
                 removed = self._jobs.pop(job_id, None)
                 if removed is not None:
-                    writer_lock, removed._writer_lock = removed._writer_lock, None
+                    writer_lock = removed._writer_lock
+                    self._pending_writer_lock = writer_lock
             if writer_lock is not None:
                 try:
-                    writer_lock.close()
+                    release_writer_process_lock(writer_lock)
                 except WebIndexBuildError as cleanup_exc:
                     cleanup_warnings = [
                         dict(item) for item in cleanup_exc.cleanup_warnings
                     ]
+                else:
+                    with self._lock:
+                        if self._pending_writer_lock is writer_lock:
+                            self._pending_writer_lock = None
+            with self._lock:
+                if self._running_job_id == "__writer_cleanup__":
+                    self._running_job_id = None
             raise ImportJobStartError(
                 type(exc).__name__, cleanup_warnings=cleanup_warnings
             ) from exc
@@ -352,7 +437,10 @@ class ImportJobManager:
         terminal: list[tuple[ImportJob, float]] = []
         for job in self._jobs.values():
             with job._lock:
-                if job.status in {"succeeded", "failed", "postcheck_failed"}:
+                if (
+                    job.status in {"succeeded", "failed", "postcheck_failed"}
+                    and job._writer_lock is None
+                ):
                     terminal.append((job, job.finished_at or job.created_at))
         terminal.sort(key=lambda item: item[1], reverse=True)
         for job, _finished_at in terminal[self.history_limit :]:
@@ -685,19 +773,23 @@ class ImportJobManager:
         finally:
             writer_lock = None
             with job._lock:
-                writer_lock, job._writer_lock = job._writer_lock, None
+                writer_lock = job._writer_lock
                 if job.cleanup_warnings and terminal_status == "succeeded":
                     job.completion_outcome = "cleanup_warning"
                 elif terminal_status == "postcheck_failed" and job.canonical_commit_succeeded:
                     job.completion_outcome = "failed_after_canonical_commit"
             if writer_lock is not None:
                 try:
-                    writer_lock.close()
+                    release_writer_process_lock(writer_lock)
                 except WebIndexBuildError as exc:
                     _add_exception_cleanup_warnings(job, exc)
                     with job._lock:
                         if terminal_status == "succeeded":
                             job.completion_outcome = "cleanup_warning"
+                else:
+                    with job._lock:
+                        if job._writer_lock is writer_lock:
+                            job._writer_lock = None
             with job._lock:
                 job.stage_timings["cleanup"] = round(
                     float(job.stage_timings.get("cleanup", 0.0))

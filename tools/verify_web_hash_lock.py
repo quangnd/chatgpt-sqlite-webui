@@ -10,7 +10,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LOCK = ROOT / "requirements-web-py312-macos-arm64.lock"
+LOCKS = {
+    "py312": ROOT / "requirements-web-py312-macos-arm64.lock",
+    "py313": ROOT / "requirements-web-py313-macos-arm64.lock",
+}
 LINE_RE = re.compile(
     r"^([a-z0-9][a-z0-9._-]*)==([A-Za-z0-9][A-Za-z0-9._+-]*) "
     r"--hash=sha256:([0-9a-f]{64})$"
@@ -34,6 +37,10 @@ EXPECTED = {
     "typing-inspection",
     "uvicorn",
 }
+EXPECTED_BY_TARGET = {
+    "py312": EXPECTED,
+    "py313": EXPECTED,
+}
 
 
 def canonical(name: str) -> str:
@@ -43,9 +50,11 @@ def canonical(name: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check-installed", action="store_true")
+    parser.add_argument("--target", choices=sorted(LOCKS), default="py313")
     args = parser.parse_args()
+    lock = LOCKS[args.target]
     rows: dict[str, tuple[str, str]] = {}
-    for number, raw in enumerate(LOCK.read_text(encoding="utf-8").splitlines(), 1):
+    for number, raw in enumerate(lock.read_text(encoding="utf-8").splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -57,11 +66,11 @@ def main() -> int:
         if key in rows:
             raise SystemExit(f"duplicate_hash_lock_package {key}")
         rows[key] = (version, digest)
-    if set(rows) != EXPECTED:
+    if set(rows) != EXPECTED_BY_TARGET[args.target]:
         raise SystemExit("hash_lock_package_set_mismatch")
     if args.check_installed:
         if not (
-            sys.version_info[:2] == (3, 12)
+            sys.version_info[:2] == ((3, 12) if args.target == "py312" else (3, 13))
             and sys.platform == "darwin"
             and platform.machine() == "arm64"
         ):
@@ -74,7 +83,8 @@ def main() -> int:
             if actual != expected_version:
                 raise SystemExit(f"hash_lock_version_mismatch {name}")
     print(f"hash_lock_valid true packages {len(rows)}")
-    print("hash_lock_target cpython-3.12-macos-arm64")
+    version = "3.12" if args.target == "py312" else "3.13"
+    print(f"hash_lock_target cpython-{version}-macos-arm64")
     print(f"installed_versions_checked {str(args.check_installed).lower()}")
     return 0
 

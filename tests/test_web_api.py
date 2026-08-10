@@ -145,6 +145,47 @@ class WebApiTests(unittest.TestCase):
         (build / "index.html").write_text("<!doctype html><html><body><div id=\"root\"></div></body></html>", encoding="utf-8")
         return build
 
+    def test_multipart_spool_is_reported_separately_from_pipeline_copy(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            archive = base / "multipart.zip"
+            value = conv(
+                "multipart",
+                "Synthetic",
+                {"n": node("n", None, "user", "synthetic", 1)},
+                "n",
+                1,
+            )
+            value["ignored_padding"] = "x" * (2 * 1024 * 1024)
+            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as bundle:
+                bundle.writestr(
+                    "conversations.json",
+                    json.dumps([value], separators=(",", ":")).encode("utf-8"),
+                )
+            client = TestClient(create_app(base / "archive.db", static_dir=self.make_build_dir(base)))
+            try:
+                with archive.open("rb") as handle:
+                    response = client.post(
+                        "/api/import/upload",
+                        files={"file": (archive.name, handle, "application/zip")},
+                    )
+                self.assertEqual(response.status_code, 200, response.text)
+                payload = response.json()
+                spool = payload["multipart_spool"]
+                self.assertTrue(spool["observable"])
+                self.assertTrue(spool["rolled_to_disk"])
+                self.assertGreaterEqual(spool["observed_bytes"], archive.stat().st_size)
+                self.assertLess(spool["memory_threshold_bytes"], spool["observed_bytes"])
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    job = client.get(f"/api/import/jobs/{payload['job_id']}").json()
+                    if job["status"] in {"succeeded", "failed", "postcheck_failed"}:
+                        break
+                    time.sleep(0.02)
+                self.assertIn(job["status"], {"succeeded", "failed", "postcheck_failed"})
+            finally:
+                client.close()
+
     def make_client(self):
         td = tempfile.TemporaryDirectory()
         base = Path(td.name)
@@ -4116,11 +4157,54 @@ class WebApiTests(unittest.TestCase):
         parsed_api = parse_query("x" * 600, enforce_api_limits=True)
         self.assertIn("q_too_long", parsed_api.errors)
 
+    def test_raw_fallback_display_http_continuation_is_revision_bound(self):
+        td, client, db = self.make_client()
+        self.addCleanup(td.cleanup)
+        raw_body = "raw-http-body-" * 100
+        conn = sqlite3.connect(db)
+        conn.execute(
+            """UPDATE conversation_nodes
+               SET content_type='legacy', content_text='[non-text content: legacy]',
+                   raw_message_json=?
+               WHERE conversation_id='web-1' AND node_id='a1'""",
+            (json.dumps({"content": {"content_type": "text", "parts": [raw_body]}}),),
+        )
+        conn.commit()
+        conn.close()
+        params = {"conversation_id": "web-1", "node_id": "a1", "offset": 0, "limit": 40}
+        first = client.get("/api/by-id/display", params=params)
+        self.assertEqual(first.status_code, 200, first.text)
+        first_payload = first.json()
+        self.assertEqual(first_payload["source"], "raw_fallback")
+        self.assertTrue(first_payload["has_more"])
+        self.assertTrue(first_payload["next_cursor"])
+        final = client.get(
+            "/api/by-id/display",
+            params={**params, "offset": first_payload["next_offset"], "limit": 4096, "cursor": first_payload["next_cursor"]},
+        )
+        self.assertEqual(final.status_code, 200, final.text)
+        self.assertTrue(final.json()["total_chars_exact"])
+        self.assertFalse(final.json()["has_more"])
+
+        conn = sqlite3.connect(db)
+        conn.execute(
+            "UPDATE conversation_nodes SET raw_message_json=? WHERE conversation_id='web-1' AND node_id='a1'",
+            (json.dumps({"content": {"content_type": "text", "parts": ["changed"]}}),),
+        )
+        conn.commit()
+        conn.close()
+        stale = client.get(
+            "/api/by-id/display",
+            params={**params, "offset": first_payload["next_offset"], "cursor": first_payload["next_cursor"]},
+        )
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(stale.json()["detail"], "display_cursor_stale")
+
     def test_schema_endpoint_includes_new_fields(self):
         td, client, _db = self.make_client()
         self.addCleanup(td.cleanup)
         schema = client.get("/api/schema").json()
-        self.assertEqual(schema["version"], 9)
+        self.assertEqual(schema["version"], 11)
         self.assertEqual(schema["versions"]["required_database_schema_version"], 6)
         self.assertEqual(schema["versions"]["optional_web_index_format_version"], "6")
         self.assertIn("include_internal", json.dumps(schema))
@@ -4175,7 +4259,7 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("rolls back", schema["web_index_build"]["publication"])
         self.assertIn("/web-index/cancel", schema["web_index_build"]["cancellation"])
         self.assertTrue(schema["import_contract"]["zip64"]["runtime_supported"])
-        self.assertFalse(schema["import_contract"]["zip64"]["physical_over_4_gib_acceptance_tested"])
+        self.assertTrue(schema["import_contract"]["zip64"]["physical_over_4_gib_acceptance_tested"])
         self.assertIn("delay WAL checkpoint", schema["export"]["snapshot"]["wal_operational_limit"])
         self.assertEqual(schema["jobs"]["web_index_progress"], [
             "status", "build_stage", "processed", "total", "complete", "batch_size",
@@ -7961,6 +8045,78 @@ class WebApiTests(unittest.TestCase):
                 self.fail("raw-only verification continuation did not finish")
             self.assertEqual(seen, {("confirmed", "n")})
             self.assertEqual(tiers, [0, 1, 2])
+
+    @unittest.skipUnless(
+        os.environ.get("CHATGPT_ARCHIVE_GIANT_RAW_EXACT_TEST") == "1",
+        "set CHATGPT_ARCHIVE_GIANT_RAW_EXACT_TEST=1 for the 20/100 MiB raw verifier acceptance",
+    )
+    def test_round10_giant_raw_exact_late_and_no_match_production_acceptance(self):
+        cases = (
+            (20 * 1024 * 1024, False, "giant-raw-no-match"),
+            (100 * 1024 * 1024, True, "giant-raw-late-needle"),
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"CHATGPT_ARCHIVE_SEARCH_EXACT_VERIFY_CHARS": str(100 * 1024 * 1024)},
+        ):
+            for target_raw_bytes, expect_hit, needle in cases:
+                with self.subTest(target_raw_bytes=target_raw_bytes, expect_hit=expect_hit):
+                    td, client, db = self.make_client()
+                    try:
+                        wrapper_bytes = len(json.dumps({
+                            "content": {"content_type": "text", "parts": [""]},
+                        }, separators=(",", ":")).encode("utf-8"))
+                        suffix = needle if expect_hit else "ordinary-tail"
+                        filler_chars = target_raw_bytes - wrapper_bytes - len(suffix)
+                        self.assertGreater(filler_chars, 0)
+                        raw_message = json.dumps({
+                            "content": {
+                                "content_type": "text",
+                                "parts": [("x" * filler_chars) + suffix],
+                            },
+                        }, separators=(",", ":"))
+                        raw_bytes = len(raw_message.encode("utf-8"))
+                        self.assertEqual(raw_bytes, target_raw_bytes)
+                        conn = sqlite3.connect(db)
+                        try:
+                            conn.execute(
+                                "UPDATE conversation_nodes SET content_type='legacy', "
+                                "content_text='[non-text content: legacy]', raw_message_json=? "
+                                "WHERE conversation_id='web-1' AND node_id='a1'",
+                                (raw_message,),
+                            )
+                            conn.commit()
+                        finally:
+                            conn.close()
+
+                        continuation = None
+                        payload = None
+                        raw_bytes_read = 0
+                        for _page in range(5):
+                            params = {"q": needle, "path": "all", "count_total": "true"}
+                            if continuation is not None:
+                                params["continuation"] = continuation
+                            response = client.get("/api/search/messages", params=params)
+                            self.assertEqual(response.status_code, 200, response.text)
+                            payload = response.json()
+                            raw_bytes_read += int(payload["diagnostics"]["raw_blob_bytes"])
+                            if payload["diagnostics"]["completion_state"] == "complete":
+                                break
+                            continuation = payload["diagnostics"]["continuation_token"]
+                            self.assertIsInstance(continuation, str)
+                        else:
+                            self.fail("giant raw exact continuation did not complete")
+                        self.assertIsNotNone(payload)
+                        self.assertTrue(payload["total_exact"])
+                        self.assertGreaterEqual(raw_bytes_read, target_raw_bytes)
+                        ids = {
+                            (item["conversation_id"], item["node_id"])
+                            for item in payload["items"]
+                        }
+                        self.assertEqual(ids, {("web-1", "a1")} if expect_hit else set())
+                    finally:
+                        client.close()
+                        td.cleanup()
 
     def test_round10_long_placeholder_uses_raw_recall_in_current_index_format(self):
         from chatgpt_export_archiver.web_db import WEB_INDEX_FORMAT_VERSION, create_web_indexes

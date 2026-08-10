@@ -156,9 +156,59 @@ class _WriterProcessLock:
 _PROCESS_LOCK_MAGIC = "chatgpt-sqlite-webui-process-lock"
 _PROCESS_LOCK_FORMAT = 3
 _PROCESS_LOCK_SHARDS = 64
+_PROCESS_LOCK_MAX_HELD_RANGES = 128
 _PROCESS_LOCK_POOL_MUTEX = threading.Lock()
 _PROCESS_LOCK_POOL_PID = os.getpid()
 _PROCESS_LOCK_POOL: dict[tuple[str, str], dict[str, Any]] = {}
+_PENDING_WRITER_CLEANUP_MUTEX = threading.Lock()
+_PENDING_WRITER_CLEANUP: dict[int, _WriterProcessLock] = {}
+
+
+def _retain_writer_process_lock_for_retry(lock: Any) -> None:
+    """Keep a production owner for handles that could not be released."""
+
+    if not isinstance(lock, _WriterProcessLock) or not lock.fds:
+        return
+    with _PENDING_WRITER_CLEANUP_MUTEX:
+        _PENDING_WRITER_CLEANUP[id(lock)] = lock
+
+
+def _forget_writer_process_lock_retry(lock: Any) -> None:
+    with _PENDING_WRITER_CLEANUP_MUTEX:
+        _PENDING_WRITER_CLEANUP.pop(id(lock), None)
+
+
+def release_writer_process_lock(lock: Any) -> None:
+    """Release every handle and retain retry ownership after a partial failure."""
+
+    try:
+        lock.close()
+    except WebIndexBuildError:
+        _retain_writer_process_lock_for_retry(lock)
+        raise
+    else:
+        _forget_writer_process_lock_retry(lock)
+
+
+def retry_pending_writer_process_lock_cleanup() -> list[dict[str, str]]:
+    """Retry each retained lock once without hiding any remaining failure."""
+
+    with _PENDING_WRITER_CLEANUP_MUTEX:
+        pending = list(_PENDING_WRITER_CLEANUP.values())
+    warnings: list[dict[str, str]] = []
+    for lock in pending:
+        try:
+            release_writer_process_lock(lock)
+        except WebIndexBuildError as exc:
+            warnings.extend(dict(item) for item in exc.cleanup_warnings)
+    return warnings
+
+
+def _pending_writer_process_lock_cleanup_count() -> int:
+    """Internal bounded-state probe used by lifecycle regressions."""
+
+    with _PENDING_WRITER_CLEANUP_MUTEX:
+        return len(_PENDING_WRITER_CLEANUP)
 
 
 def _process_lock_registry() -> Path:
@@ -213,6 +263,8 @@ def _reset_process_lock_pool_after_fork() -> None:
         except OSError:
             pass
     _PROCESS_LOCK_POOL.clear()
+    with _PENDING_WRITER_CLEANUP_MUTEX:
+        _PENDING_WRITER_CLEANUP.clear()
     _PROCESS_LOCK_POOL_PID = pid
 
 
@@ -257,6 +309,11 @@ def _acquire_process_lock_key(
         _reset_process_lock_pool_after_fork()
         entry = _PROCESS_LOCK_POOL.get(pool_key)
         if entry is not None and lock_offset in entry["offsets"]:
+            raise WebIndexBuildError("writer_process_lock_busy")
+        held_ranges = sum(
+            len(value["offsets"]) for value in _PROCESS_LOCK_POOL.values()
+        )
+        if held_ranges >= _PROCESS_LOCK_MAX_HELD_RANGES:
             raise WebIndexBuildError("writer_process_lock_busy")
         fd: int | None = int(entry["fd"]) if entry is not None else None
         created = False
@@ -364,6 +421,10 @@ def acquire_writer_process_lock(db_path: Path) -> _WriterProcessLock:
         # Windows. Fail before registry creation, upload spool, database create,
         # lease, or staging until a File-ID/ACL/reparse-safe backend exists.
         raise WebIndexBuildError("writer_process_lock_unsupported")
+    # A failed unlock retains its exact lock object. Retry it before opening
+    # another registry handle; persistent failures remain fail-closed for the
+    # affected range and the fixed range cap prevents unbounded ownership.
+    retry_pending_writer_process_lock_cleanup()
     registry = _process_lock_registry()
     keys = _database_lock_keys(db_path)
     lock = _WriterProcessLock([], set(), set())
@@ -378,7 +439,7 @@ def acquire_writer_process_lock(db_path: Path) -> _WriterProcessLock:
         return lock
     except Exception as exc:
         try:
-            lock.close()
+            release_writer_process_lock(lock)
         except WebIndexBuildError as cleanup_exc:
             existing = list(getattr(exc, "cleanup_warnings", []))
             setattr(
@@ -1009,7 +1070,7 @@ def create_web_indexes(
     except Exception as exc:
         if owns_process_lock:
             try:
-                process_lock.close()
+                release_writer_process_lock(process_lock)
             except WebIndexBuildError as cleanup_exc:
                 existing = list(getattr(exc, "cleanup_warnings", []))
                 setattr(
@@ -1739,7 +1800,7 @@ def create_web_indexes(
             if owns_process_lock:
                 active_error = sys.exception()
                 try:
-                    process_lock.close()
+                    release_writer_process_lock(process_lock)
                 except WebIndexBuildError as cleanup_exc:
                     if published_result is not None:
                         published_result["cleanup_warnings"] = [

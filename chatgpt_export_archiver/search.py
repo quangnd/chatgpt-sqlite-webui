@@ -219,7 +219,7 @@ def _decode_display_cursor(
         or
         not isinstance(identity, str) or len(identity) > 128
         or not isinstance(revision, str) or len(revision) > 256
-        or source not in {"canonical"}
+        or source not in {"canonical", "raw_fallback"}
         or isinstance(byte_offset, bool) or not isinstance(byte_offset, int)
         or byte_offset < 0 or byte_offset > MAX_SQLITE_CURSOR_OFFSET
         or isinstance(char_offset, bool) or not isinstance(char_offset, int)
@@ -2523,6 +2523,7 @@ def get_message_display_chunk(
             raise
     content_prefix = normalize_display_text(prefix_bytes.decode("utf-8", errors="replace"))
     revision = _display_revision_from_values(row)
+    cursor_state: tuple[str, str, str, int, int] | None = None
     if cursor:
         (
             cursor_identity,
@@ -2531,11 +2532,17 @@ def get_message_display_chunk(
             byte_offset,
             char_offset,
         ) = _decode_display_cursor(database_token_identity, cursor)
+        cursor_state = (
+            cursor_identity,
+            cursor_revision,
+            cursor_source,
+            byte_offset,
+            char_offset,
+        )
         if (
             cursor_identity != _display_cursor_identity(conversation_id, node_id)
             or cursor_revision != revision
             or char_offset != offset
-            or cursor_source != "canonical"
         ):
             raise DisplayCursorError("display_cursor_stale")
     resolver_input_truncated = False
@@ -2554,6 +2561,8 @@ def get_message_display_chunk(
             max_bytes=SEARCH_EXACT_VERIFY_BYTES,
         )
     if prefix_bytes and placeholder_exact is False:
+        if cursor_state is not None and cursor_state[2] != "canonical":
+            raise DisplayCursorError("display_cursor_stale")
         if not cursor:
             byte_offset = 0
             char_offset = 0
@@ -2633,6 +2642,27 @@ def get_message_display_chunk(
             offset = max(0, anchor_char_offset - min(limit // 2, 4096))
         chunk = recovered[offset : offset + limit]
         source = "raw_fallback" if recovered != canonical else "canonical_placeholder"
+        if cursor_state is not None:
+            if cursor_state[2] != source:
+                raise DisplayCursorError("display_cursor_stale")
+            expected_byte_offset = _utf8_prefix_bytes(recovered, offset)
+            if cursor_state[3] != expected_byte_offset:
+                raise DisplayCursorError("display_cursor_stale")
+    continuable_has_more = (
+        canonical_has_more
+        if source == "canonical"
+        else (not canonical_unclassifiable and offset + len(chunk) < total_chars)
+    )
+    if source == "raw_fallback" and continuable_has_more:
+        next_char_offset = offset + len(chunk)
+        next_cursor = _encode_display_cursor(
+            database_token_identity,
+            _display_cursor_identity(conversation_id, node_id),
+            revision,
+            _utf8_prefix_bytes(recovered, next_char_offset),
+            next_char_offset,
+            source="raw_fallback",
+        )
     return {
         "conversation_id": conversation_id,
         "node_id": node_id,
@@ -2641,11 +2671,11 @@ def get_message_display_chunk(
         "returned_chars": len(chunk),
         "total_chars": total_chars,
         "total_chars_exact": total_exact,
-        "has_more": (
-            canonical_has_more
-            if source == "canonical"
-            else canonical_unclassifiable or offset + len(chunk) < total_chars
-        ),
+        # ``has_more`` promises that another request can make progress.  An
+        # unclassifiable canonical placeholder is terminal but incomplete;
+        # ``total_chars_exact = false`` represents that state without
+        # advertising a continuation that does not exist.
+        "has_more": continuable_has_more,
         "next_offset": (
             total_chars
             if canonical_has_more

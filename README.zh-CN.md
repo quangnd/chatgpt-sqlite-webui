@@ -2,25 +2,20 @@
 
 语言: [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文（臺灣）](README.zh-TW.md) | [日本語](README.ja-JP.md) | [Español](README.es-ES.md)
 
-把 ChatGPT 官方导出的 ZIP 变成私有、可搜索的 SQLite 知识档案。
+把官方 ChatGPT 导出 ZIP 变成私有、可搜索的 SQLite 归档。可通过 CLI 或本地 Web UI 导入，在浏览器中阅读和搜索对话，并导出为 Markdown 或 TXT。所有功能都在你的电脑上运行。
 
-`本地优先` · `SQLite` · `隐私优先` · `快速导入` · `快速 Web 索引` · `聊天式 Web UI` · `Markdown/TXT 导出`
-
-ChatGPT Export Archiver 可以直接导入 OpenAI / ChatGPT 官方 export ZIP，写入 SQLite，验证归档，建立搜索索引，打开本地 Web UI，并把会话导出为 Markdown 或 TXT。它适合长期个人归档、离线检索、知识库迁移，以及官方历史记录页面没有提供的本地文件和索引工作流。
+`本地优先` · `SQLite` · `私有搜索` · `CLI` · `Web UI` · `Markdown/TXT 导出`
 
 ## 为什么值得用
 
-- **本地优先，保护隐私。** ZIP、数据库、导出文件、临时上传副本、Web UI 和日志都留在你的电脑上，除非你自己移动。
-- **直接导入 ZIP。** 可以直接读取 ChatGPT 官方导出 ZIP，不需要手动解压或合并 shard。
-- **面向大型归档。** 推荐导入路径支持大 ZIP、增量导入、延后 FTS 重建和经过优化的可选 Web 搜索索引。
-- **聊天式阅读器。** Web UI 默认改为类似 ChatGPT 网页的布局：user 在右侧，assistant 在左侧，system/internal 默认折叠但可展开。
-- **保留经典技术视图。** 可以在设置里切换，或通过 `?layout=classic` / `?messageLayout=classic` 回到旧的逐行布局。
-- **更适合归档的搜索。** 在长期归档和本地检索场景下，本地 SQLite 搜索比官方历史页面更可控：支持 role/title/source/scope/exclude、短语、OR、分页、verify、可重建索引和导出。
-- **可迁移导出。** Markdown 和 TXT 导出是确定性的，适合备份、本地知识库、离线 grep 和迁移。
+- **私有且本地。** ZIP、数据库、导出文件、临时上传、Web UI 和日志都保存在你的电脑上。
+- **直接增量导入。** 无需合并即可读取官方 ZIP 或已解压的 JSON 分片，并安全更新已有归档。
+- **便于阅读和搜索。** 使用聊天式阅读器、经典布局、筛选器、短语、排除条件、分页和可选快速索引。
+- **便于迁移。** 导出确定性的 Markdown 或 TXT，用于备份、离线使用或迁移。
 
 ## 截图
 
-安全截图待补充。截图应使用 synthetic 假数据，不能包含真实聊天标题、snippet、raw JSON、邮箱或本机路径。
+截图只能使用合成对话，不得显示真实标题、消息、文件名、电子邮件地址或本地路径。
 
 ## 项目功能
 
@@ -36,28 +31,20 @@ ChatGPT Export Archiver 可以直接导入 OpenAI / ChatGPT 官方 export ZIP，
 
 ## 隐私
 
-所有处理都在本机完成。数据库、导出的文件、临时上传副本、Web UI 和日志都留在你的电脑上，除非你自己移动或发布它们。命令行默认打印的是 ID、计数、时间戳和状态行，而不是消息片段。CLI summary 和日志不会输出聊天正文、标题、snippet、raw JSON、完整输入/输出路径或真实 ZIP 文件名；导入 summary 只报告输入类型，例如 `source zip`。Web UI 面向本地使用，默认绑定到 `127.0.0.1`。
-
-在导入 summary 中，`valid_conversations` 统计的是去重合并前已经解析通过的输入 conversation 元素。发生重复 id 合并时，它可能大于最终的 `inserted_conversations`、`updated_conversations` 或 `unchanged_conversations` 数据库变更计数。
-
-`inspect` 和 scanner 错误默认不会打印真实 ZIP 文件名或完整路径。`verify`、`stats`、`search`、`export` 等需要既有数据库的 CLI 命令在数据库路径写错时会报告 `database_not_found`，不会创建空 SQLite 文件。Web 搜索在可用时把可选 trigram 索引作为候选召回层，随后仍执行规范化子串过滤，因此短查询、符号和不支持 trigram 的情况会安全回退。
-
-`--delete-input-on-success` 现在是 fail-closed 兼容选项。现有 Python/操作系统原语无法排除在最终校验前已打开同一 inode 的不合作 writer，因此 production 命令会在建库、journal、staging 或 rename 前返回 `delete_input_secure_identity_unsupported`。普通导入仍可使用且绝不删除原输入；`recover-delete-input` 只用于历史受支持运行遗留且可严格验证所有权的 journal。
-
-数据库和导出的 Markdown / TXT 仍可能包含私人聊天内容。请把 `archive/*.db`、导出文件和原始 ChatGPT 导出 ZIP 都当作敏感资料处理。
+所有功能都在本地运行，Web UI 默认绑定 `127.0.0.1`。普通导入不会删除原始 ZIP；浏览器上传使用服务器端临时副本。数据库和导出文件包含私密对话内容，请妥善保存。
 
 ## 环境要求
 
-- Python 3.10 或更新版本；Python 3.12 是 Web 依赖可复现安装的测试目标。
-- SQLite 需要 JSON 支持。FTS5 是可选能力；不可用或缺少 `message_fts` 时仍使用安全扫描搜索。
-- 只有在你需要重新构建 React Web UI 或运行前端检查时，才需要 Node.js 和 npm。runnable 交付包已经包含 `webui/dist`，正常本地使用 Web UI 不需要重新构建前端。
-- 核心 CLI 只使用 Python 标准库，没有 Web 包也能运行。如需启动 Web UI（包括 ZIP 上传），请安装 `requirements-web.txt`；缺少该 profile 时，`web` 命令会立即失败并给出安装提示。
+- Python 3.10 或更高版本；Web 依赖使用 Python 3.13 测试。
+- SQLite 需要 JSON 支持。FTS5 可选，因为仍可使用扫描搜索。
+- 只有重建或测试 React Web UI 时才需要 Node.js 和 npm。
+- CLI 使用 Python 标准库。运行 Web UI 和浏览器 ZIP 上传时安装 `requirements-web.txt`。
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
-python -m pip install -r requirements-web.txt -c constraints-web-py312.txt
+python -m pip install -r requirements-web.txt -c constraints-web-py313.txt
 ```
 
 Windows PowerShell：
@@ -66,7 +53,7 @@ Windows PowerShell：
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
-python -m pip install -r requirements-web.txt -c constraints-web-py312.txt
+python -m pip install -r requirements-web.txt -c constraints-web-py313.txt
 ```
 
 Windows cmd.exe：
@@ -75,10 +62,8 @@ Windows cmd.exe：
 py -3 -m venv .venv
 .venv\Scripts\activate.bat
 python -m pip install -U pip
-python -m pip install -r requirements-web.txt -c constraints-web-py312.txt
+python -m pip install -r requirements-web.txt -c constraints-web-py313.txt
 ```
-
-Python 3.12 constraints 是跨平台 resolved-version profile，本身没有 artifact hash。`requirements-web-py312-macos-arm64.lock` 只适用于 CPython 3.12/macOS arm64；用 `pip --require-hashes --only-binary=:all:` 安装时才会核验下载 wheel 的真实字节。`python tools/verify_web_hash_lock.py` 只检查 lock 的结构、目标、版本与 hash 语法。其他平台应使用可信 index 的 portable profile。
 
 ## 快速开始
 
@@ -181,17 +166,11 @@ python chatgpt_archive.py export --db archive/chatgpt_archive.db --format all --
 python chatgpt_archive.py export --db archive/chatgpt_archive.db --format md --out exports --from 2024-01-01 --to 2024-12-31 --force
 ```
 
-导出 summary 报告的是正文文件计数。`written` 统计最终字节发生变化的 Markdown/TXT 正文文件，`skipped_unchanged` 统计未变化的 Markdown/TXT 正文文件。manifest 会按需更新，但不计入这两个计数。
-
-CLI 与 Web 导出默认使用有效当前路径，并且只包含可见消息。需要包含分支或内部消息时，请显式使用 `--path all` 和/或 `--include-internal`；manifest 会记录这两个选择。CLI 导出会分批、限量读取对话节点；Web 下载与`复制当前路径整段对话`使用专用的有界服务端文本流。因此，完整规范文本以及符合条件的 legacy/raw 恢复文本不会受 reader 响应预算截断。
-
 重建可选 Web 搜索索引：
 
 ```bash
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 ```
-
-`web-index` 会按明确阶段扫描并规范化消息与标题，并在支持时构建 trigram 索引。每次构建使用不可预测的独立 staging 名称与持久 owner-token lease；第二个构建会以 `web_index_build_in_progress` 拒绝，过期清理也必须验证精确所有权。所有阶段均使用有界 keyset 与输入、规范化、派生及 FTS-bind 字节预算并报告实测峰值。批次之间释放 writer lock；最终用一个短 `BEGIN IMMEDIATE` 事务复核 canonical generation、对象所有权和 metadata 后原子发布。提交前 reader 始终看到旧索引；generation 变化、SQLite 中断、磁盘错误或取消都会保留旧索引，并且只清理该 lease 拥有的对象。Web import job 会报告 stage 与 processed/total，`POST /api/import/jobs/{job_id}/web-index/cancel` 取消仅适用于导入任务的索引阶段。超预算行会记录并对 canonical text 做精确验证，构建索引不会降低召回率。
 
 启动 Web UI：
 
@@ -207,57 +186,29 @@ python chatgpt_archive.py web --db archive/chatgpt_archive.db --port 8787
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --no-input-sha256 --rebuild-fts
 ```
 
-输入可以是 ZIP、单个 `conversations.json`，或包含 `conversations.json` 或分片 `conversations-*.json` 文件的解压目录。scanner discovery 会忽略 `__MACOSX`、AppleDouble `._*` 文件和 `.DS_Store` 等 macOS metadata paths，因此这些本地 artifact 不会成为 conversation source。
-
-对于目录输入，POSIX 平台会在可用时逐 component 使用 `dir_fd` 与 `O_NOFOLLOW`。便携 fallback 会拒绝 symlink/reparse component，并在按路径打开前立即校验 containment，但 Python 标准库无法在所有平台消除所有本地 replacement race。不要导入不可信本地用户或并发进程可修改的解压目录；此威胁模型应使用原始只读 ZIP。
-
 如果你愿意让 SQLite 在导入后额外花时间整理 planner statistics 和 FTS 索引，可以使用：
 
 ```bash
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --no-input-sha256 --rebuild-fts --optimize-after-import --optimize-fts-after-import
 ```
 
-`--delete-input-on-success` 默认关闭，并且当前所有平台都不支持。指定后会在 staging 和导入前以 `delete_input_secure_identity_unsupported` 失败，不会静默降级为有竞态的 unlink。请在独立验证数据库后自行保留或删除原 ZIP。
+`--delete-input-on-success` 仅为兼容保留，但不可用，并会在导入前失败。普通导入不会删除原始 ZIP；请在验证数据库后自行删除。
 
 ```bash
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --no-input-sha256 --rebuild-fts --delete-input-on-success
 ```
 
-增量导入是正常使用方式。把较新的导出再次导入同一个数据库时，会更新已变化的会话，并保留其余归档数据。
-
 ## Web UI 流程
 
-Web UI 是由 FastAPI 提供服务的本地 React 应用。推荐路径是直接使用 runnable tree 中已经构建好的 `webui/dist`。
+使用下面的命令启动本地 Web UI。它可打开已有数据库，也可在没有数据库时启动并从浏览器导入 ZIP。阅读器提供分页的聊天与经典布局、搜索、内部消息控制、复制和下载。
 
 ```bash
 python chatgpt_archive.py web --port 8787
 ```
 
-默认阅读布局是 `chat`：user 消息靠右，assistant 消息靠左，system/internal 消息以折叠提示显示。要使用旧的逐行技术布局，可以在设置里选择「经典逐行」，或在 Web UI URL 后添加 `?layout=classic` 或 `?messageLayout=classic`。
-
-所有入口共用同一套 `path=current` effective-current 规则：有效且属于该会话的 `current_node` 及其父链优先，即使所有 raw flag 都为 0；否则选择确定的可用 `is_on_current_path=1` 叶链；只有两者都不存在时，该会话才 fallback 到 all。响应保持 raw flag 原义，并提供 `current_node_exists`、`current_collection_source`、`current_path_fallback_to_all`、`effective_path` 和逐节点 effective visibility。断裂父链和 cycle 会有限、确定地诊断，不会让递归查询挂起。
-
-阅读器复制和导出遵守可见性设置。`复制当前路径整段对话` 使用有界完整文本流，遵守当前 reader 路径和「显示内部消息」。`复制当前可见` 只提交已加载可见消息的 ID，由服务端在同一个 SQLite 读快照中流式返回，避免混合两次写入前后的内容。下载链接使用同样的路径和内部消息设置；消息 raw 入口是有上限的较大 raw 预览，截断时以纯文本 `raw_text` 显示。
-
-reader 使用 `around_node_id` 跳转到命中时，会使用与 reader 相同的分页集合：Show internal 关闭时使用 visible-only rows，Show internal 开启时使用完整 node collection；对没有 current-path node 的损坏 conversation，使用 effective all-node collection。
-
-Web UI 有两种使用方式。如果数据库已经存在，可以显式传入数据库路径，也可以使用默认路径。如果数据库不存在，也可以先启动 Web UI，再用导入面板上传 ChatGPT 导出 ZIP。上传导入会串行执行，同一进程内一次只允许一个 SQLite writer。
-
-Web 上传导入成功后，后端使用与 CLI 相同的核心 import pipeline，然后运行 `verify`、`stats` 和 `web-index`。上传 ZIP 是服务端临时副本，会独立于你磁盘上的原始文件进行清理。
-
-预检失败与终态导入任务都可能返回多个 `cleanup_warnings`。React UI 会把每个安全 warning code 与 `path_kind` 显示为本地化用户文案，同时兼容已弃用的单值 `cleanup_warning`。这些提示不会显示临时路径、文件名、OS message 或 error class；重复轮询会替换同一任务快照，不会追加重复提示。
-
-如果无法提供预构建 React 应用，服务端 fallback HTML 只是功能受限的紧急界面，并非完整 reader 的替代品。它的搜索和阅读控制较少，下载默认排除 internal node；要使用完整 UI，请重新构建 `webui/dist`。
-
 ## Web 上传安全限制
 
-Web 上传在导入 job 启动前执行应用层安全限制。这些限制由环境变量控制，与 CLI `import` 无关（CLI 不使用这些限制）。
-
-Web 上传会在读取文件前先保留 pending slot，因此大型上传不能与另一个 writer 竞争。从保留 slot 之后发生的任何错误，包括临时上传路径创建失败，都必须释放 slot 并清理服务端临时目录；成功启动的 import job 会接管 slot 和临时副本。
-
-进程被 kill、OOM 或宿主崩溃可能绕过正常清理，在操作系统临时目录遗留旧的 `chatgpt-archive-upload-*` 目录。本版本不会自动删除它们，因为 ownership/age 判断错误可能删除无关数据。停止服务器后，管理员只能在确认精确前缀、当前账号 ownership、目录年龄、没有 symlink/reparse point 且没有任务使用后，逐个删除旧目录；绝不能删除用户导出 ZIP，也不要使用未经检查的 wildcard。
-
-当 Web UI 绑定到 loopback 地址（`127.0.0.1`、`localhost`、`::1`）时，默认允许大型可信归档：
+浏览器上传会在导入前检查文件。回环访问使用下表中的本地大文件默认值；非回环访问必须显式启用，并使用较小的安全默认值，除非主动选择可信本地配置。CLI `import` 不受这些上传限制影响。
 
 | 环境变量 | 本机默认值 | 控制内容 |
 |---|---|---|
@@ -268,10 +219,6 @@ Web 上传会在读取文件前先保留 pending slot，因此大型上传不能
 | `CHATGPT_ARCHIVE_MAX_UPLOAD_COMPRESSION_RATIO` | 1,000.0 | 大型 JSON member 最大压缩比 |
 | `CHATGPT_ARCHIVE_MAX_UPLOAD_TOTAL_MEMBERS` | 100,000 | ZIP 内总 member 数上限 |
 | `CHATGPT_ARCHIVE_REMOTE_UPLOAD_PROFILE` | 未设置 | 只在可信非 loopback 网络上设为 `local`，让未设置的上传限制使用本机默认值 |
-
-**远程绑定策略。** 绑定非 loopback 地址（如 `0.0.0.0`、`::` 或局域网 IP）时，必须通过 `CHATGPT_ARCHIVE_ALLOW_REMOTE_ACCESS=true`、`CHATGPT_ARCHIVE_ALLOW_REMOTE_UPLOADS=true` 或 `CHATGPT_ARCHIVE_REMOTE_UPLOAD_PROFILE=local` 明确 opt-in，否则启动会被拒绝。remote-safe 默认值为 128 MiB 压缩 ZIP、256 MiB 每 JSON member、512 MiB 总未压缩、200.0 压缩比、200 个 JSON member和 10,000 个 ZIP 总 member；可信 loopback/local 默认压缩比为 1000.0。`ALLOW_REMOTE_UPLOADS` 只放宽显式设置的限制，未设置项仍 remote-safe；`REMOTE_UPLOAD_PROFILE=local` 会把全部未设置限制恢复为本机大默认值，只适合可信 LAN。
-
-`/api/schema` 会报告当前有效上传策略。所有上传都必须提供有效 `Content-Length`。服务器会在第一次接收 body 前检查 multipart parser 所用临时文件系统；解析后再分别检查项目上传目录和数据库文件系统，它们可能不是同一磁盘。应为 parser spool、服务端 ZIP、数据库、WAL/TEMP 和索引预留空间。ZIP 检查先执行，但 JSON 解码、SQLite 写入和 `web-index` 的资源消耗仍与解码后数据量相关。
 
 如需为合法的大型归档提高本机限制，在启动 Web UI 前设置相应变量：
 
@@ -324,15 +271,11 @@ export CHATGPT_ARCHIVE_REMOTE_UPLOAD_PROFILE=local
 python chatgpt_archive.py web --host 0.0.0.0 --port 8787
 ```
 
-仅对你信任的本机文件设置更高限制。更大的值会提高 ZIP bomb、磁盘压力和 CPU/内存风险。
-
 ## 搜索语法
 
-CLI 搜索使用安全查询语法，不直接使用 SQLite 查询文本。普通词是 normalized substring `contains` 并默认 AND；大写 `OR` 建立备选分支。引号保留短语，`-term`/`-"quoted phrase"` 表示排除。`word` 只对 ASCII 字母、数字、下划线应用边界；CJK 在无分词时保守地保持 normalized contains。支持 `role:user`、`source:zip`、`path:current`、`path:all`、`scope:title`、`scope:message`；查询中的 raw `path:`/`scope:` 会覆盖 UI 选择器。输出不含 snippet。
+搜索支持普通词、引号短语、大写 `OR`、`-term` 形式的排除条件，以及 `role:user`、`source:zip`、`path:current`、`path:all`、`scope:title` 和 `scope:message` 等筛选器。查询是搜索文本，不是原始 SQL。
 
-排除词对会话结果采用 conversation-level 语义：只要所选搜索 scope 和 path 内任意标题或消息命中排除片段，该 conversation 就不会返回。`/api/search/messages` 仍只返回自身不包含排除片段的消息命中。`path:current` 按每个 conversation 遵守 reader 路径；如果损坏归档完全没有 current-path node，current-path 搜索会 fallback 到 reader 显示的同一个 all-node 视图。
-
-日期筛选（例如 `after:2026-05-01`、`before:2026-05-13`、`--from`、`--to`）使用 UTC 自然日。起始日期包含 `00:00:00Z`，结束日期以次日 `00:00:00Z` 为排他上界。CLI 导出时间与确定性文件名日期使用 UTC；浏览器按浏览器本地时区显示。Web 搜索框最多 500 字符。虚拟列表只渲染部分行，因此浏览器 Cmd/Ctrl+F 看不到未渲染消息；整段搜索请使用归档搜索或复制会话。
+日期筛选和导出日期范围使用 UTC 日历日。浏览器 Cmd/Ctrl+F 只能看到已渲染的内容；查找未加载内容时请使用归档搜索或复制对话。
 
 ```bash
 python chatgpt_archive.py search --db archive/chatgpt_archive.db "python sqlite"
@@ -346,32 +289,24 @@ Web 搜索使用 `web-index` 建立的可选 normalized trigram 索引，适合�
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 ```
 
-搜索 diagnostics 是 best-effort 性能提示。它们只能报告 normalized-safe 候选层或扫描 fallback，例如 normalized trigram、normalized scan、normalized title scan 或 full scan。可以单独报告 legacy raw FTS 是否存在，但不能把它声明为实际 candidate backend，因为它可能漏掉规范化等价文本。
-
-如果你手动执行 `VACUUM`、`VACUUM INTO`，或使用外部工具重写/压缩 SQLite 数据库，请在继续依赖 Web UI 搜索前重新运行 `python chatgpt_archive.py web-index --db <archive.db>`。Web UI 的可选索引可以从主数据表安全重建，不会改变原始会话数据。
-
 ## 验证与可选 Web 索引
 
-`verify` 会检查 SQLite integrity 和项目层级的一致性，包括缺失的 current node、断裂的父节点链接、空会话和父节点环。
+导入后运行 `verify` 检查 SQLite 和对话链接。
 
 ```bash
 python chatgpt_archive.py verify --db archive/chatgpt_archive.db
 ```
 
-`message_fts_rebuildable` 来自真实 runtime capability，而不是常量：FTS 缺失但 FTS5 可用时报告 `missing` 且可重建；FTS5 模块不可用时报告 `capability_unavailable` 且不可重建；表损坏时报告 `damaged`，是否可重建仍由同一有界 runtime probe 决定。其他 SQLite 错误会交给结构化数据库错误分类器。
-
-如果 `PRAGMA integrity_check` 报告 `web_message_trigram` 或 `web_title_trigram` 的 FTS5 inverted index 损坏，核心会话数据仍可能是结构正常的，只是可选 Web 搜索索引损坏。此时 `verify` 会报告 `optional_web_index_error true` 并打印恢复提示。用下面的命令重建可选 Web 索引：
+CLI FTS 和 Web 子串索引都是可选的。如果 `verify` 报告可选 Web 索引错误，请重建索引后再次验证：
 
 ```bash
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 python chatgpt_archive.py verify --db archive/chatgpt_archive.db
 ```
 
-这个诊断是保守的。只有当所有 integrity-check 错误都能归因到这些可选 Web 索引表或其 FTS5 shadow tables 时，才会标记为可选 Web 索引问题。
-
 ## 日志
 
-日志等级为 `debug`、`info`、`warning`、`error` 和 `none`。默认等级是 `warning`。越详细的等级会包含其后更安静等级的内容。日志不会包含标题、snippet、raw JSON 或消息正文。
+日志级别为 `debug`、`info`、`warning`、`error` 和 `none`，默认为 `warning`。日志只包含状态和计数，不包含对话标题、消息、片段或原始 JSON。
 
 日志参数可以写在子命令之前，也可以写在子命令之后：
 
@@ -382,11 +317,9 @@ python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_Z
 python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_ZIP" --json-logs --log-file logs/import.jsonl
 ```
 
-请把 JSON logs 放在 `logs/` 这类已忽略位置。`*.jsonl` 是本地日志产物，delivery clean 会拒绝它们。
-
 ## 从源码构建
 
-运行 Python 检查，并在第一次 delivery clean 前清理安全的生成物：
+以下命令用于运行项目检查、构建 Web UI、清理生成文件并检查可运行交付包。
 
 ```bash
 python -m compileall chatgpt_archive.py chatgpt_export_archiver tests tools
@@ -409,10 +342,6 @@ python tools/clean_generated_artifacts.py --fail-on-blocked
 python tools/check_delivery_clean.py --mode runnable .
 ```
 
-`clean_generated_artifacts.py` 是跨平台工具，并会保留 `webui/dist`。它只删除可安全再生成的文件，不会删除数据库、ZIP、SQLite sidecar、`archive/`、`exports/` 或 `logs/`；如果 delivery clean 仍报告这些敏感路径，请把它们移出项目根目录或手动删除。验收命令使用 `--fail-on-blocked`，因此敏感残留会立即中止交付流程。
-
-Windows PowerShell 或 cmd 用户在 search query 包含空格时请使用双引号，例如 `"python sqlite"` 或 `"role:user path:current python -pandas"`。上面的 Python、Web、Web index、typecheck、build、cleanup 和 delivery-check 命令在 Python 与 Node 位于 `PATH` 时可用于 macOS、Windows 和 Linux。如果 Windows 使用 Python launcher，可用 `py -3 tools/clean_generated_artifacts.py --fail-on-blocked` 运行清理工具。
-
 检查 ZIP 交付包：
 
 ```bash
@@ -421,17 +350,11 @@ python tools/check_delivery_clean.py --mode runnable path/to/delivery.zip
 
 ## 软件包内容
 
-runnable delivery 应包含 Python 源码、测试、文档、`requirements-web.txt`、`constraints-web-py312.txt`、`webui/src`、`webui/tests` 和 `webui/scripts` 下的前端源码与测试、前端配置/package 文件，以及 `webui/dist` 下的构建产物。不应包含 `webui/node_modules`、`webui/tsconfig.tsbuildinfo`、Python 缓存目录或字节码、coverage/typecheck 缓存、`.DS_Store`、AppleDouble `._*` 文件、`__MACOSX`、`Thumbs.db`、`Desktop.ini`、`.gitignore.md`、临时日志、本机验收日志、`*.log`、`*.ndjson`、`*.jsonl`、`archive/`、`exports/`、任何 `*.zip`、`conversations*.json`、`*.db`、`*.sqlite`、`*.sqlite3` 等真实数据库文件，或 `*.db-journal`、`*.sqlite-wal`、`*.sqlite-shm`、`*.sqlite-journal`、`*.sqlite3-wal`、`*.sqlite3-shm`、`*.sqlite3-journal` 等 SQLite sidecar。目录检查允许目标根目录自己的 `.git`，因此普通 Git clone 可以直接检查；嵌套 `.git` 会失败，ZIP delivery 中任何 `.git` 都会失败。
-
-source-only delivery 可以省略 `webui/dist`，但之后需要先重新构建前端，才能提供完整 React UI。
+可运行软件包包含 Python 源码、测试、文档、Web 依赖与源码，以及构建好的 `webui/dist`。数据库、导出文件、ZIP、日志、缓存、`node_modules` 和其他本地数据不应放入软件包。
 
 ## 数据库概览
 
-主数据库保存 conversations、mapping nodes、import runs 和 warnings。message object 的 raw JSON 字段按完整对象保留；conversation 和 mapping-node object 会规范化，不做逐字节原样保存。输入 ZIP SHA-256 是可选项，`source_files`/`file_index` 的逐 entry SHA 列为保留字段，目前不填充。CLI FTS 表是 `message_fts`。可选 Web 搜索辅助表包括 `web_message_norm`、`web_title_norm`、`web_message_trigram`、`web_title_trigram`，以及 SQLite FTS5 shadow tables。
-
-canonical 数据库使用 `PRAGMA user_version`（当前版本 6）；旧数据库的只读入口会返回 `database_migration_required`。Migration 按实际 predecessor step 估算容量：表重写/回填保留 rewrite 与 journal 空间，v5 的 metadata/query-generation 升级不再假定重写全部节点。`BEGIN IMMEDIATE` 内会在首次变更前重新核对 size、row、sidecar、计划步骤和 free space。compatibility scan 精确、分批、可取消；取消、中断、ENOSPC 或 SQLite 失败会完整回滚。当前干净数据库重复 migrate 是真正 no-op；只读路径不会迁移。升级前先验证外部备份。
-
-Health 与 `verify` 会区分可选 `message_fts` 缺失和损坏。损坏时报告 `optional_message_fts_error` 与 `--rebuild-fts` 恢复提示；通用的 malformed、locked、readonly、I/O 和 SQL 运行时错误不会被伪装成能力缺失，并使用 `database_malformed`、`database_locked`、`database_readonly`、`database_io_error` 或 `database_runtime_failure`。
+SQLite 保存对话、消息、导入记录、警告和可选搜索索引。数据库出现 `database_migration_required` 时，请先备份，再运行 `python chatgpt_archive.py migrate --db archive/chatgpt_archive.db`。
 
 ## 已知限制
 
@@ -441,36 +364,6 @@ Health 与 `verify` 会区分可选 `message_fts` 缺失和损坏。损坏时报
 - 导出文件名片段会同时按 Windows 和类 Unix 系统清理，包括 `CON`、`AUX`、`COM1`、`LPT9`、`COM¹`、`LPT²` 等保留设备名，以及尾随点和空格。
 - 超大型归档在导入、重建 FTS 和构建 Web trigram 索引时都可能需要时间。大型导入优先使用 `--rebuild-fts` 路径。
 
-## 安全与响应契约
+## 安全提示
 
-上传入口对 `Origin`、`Content-Length` 和 `Sec-Fetch-Site` 各只接受一个值。Origin 必须是没有用户信息、路径、查询、片段、控制字符或逗号链的单一 HTTP(S) origin；Content-Length 必须是规范的非负 ASCII 十进制整数。重复或畸形的安全标头会在 multipart 解析前拒绝；无效或非有限的压缩比配置会回退到有限的安全 profile 默认值。
-
-Web 会校验所有请求的 Host；非 loopback bind 必须配置 `CHATGPT_ARCHIVE_ALLOWED_HOSTS` 或 CLI `--allowed-hosts`，禁止 `*`；trusted proxy 采用严格单 edge 合同，通过 `CHATGPT_ARCHIVE_TRUSTED_PROXIES` 或 `--trusted-proxies` 配置。远程写入必须有同源 `Origin`，重复或畸形 Fetch Metadata 会被拒绝。除浅层 `/api/health` 外，API 读取也拒绝 `Sec-Fetch-Site: cross-site`；静态 UI、直接导航的 `none` 以及不发送该标头的命令行客户端保持兼容。
-
-导入失败使用稳定的输入预检、source scan、source read、JSON decode、顶层契约和事务阶段。新增稳定 code 包括 `upload_preflight_failed`、`input_source_open_failed`、`input_source_not_regular_file`、`source_read_failed`、`source_changed_during_read`、`invalid_conversation_encoding` 和 `json_integer_too_large`。清理诊断使用结构化 `cleanup_warnings` 数组；旧 `cleanup_warning` 标量仅代表首项。任何响应都不泄漏临时路径。
-
-上传会在接收前检查 parser spool 文件系统，并在解析后检查服务端 ZIP 与数据库文件系统。Import、migration 和可选 Web index 也会做容量预检并保留应急空间。ENOSPC 返回稳定的 `*_disk_space_insufficient` 错误；事务回滚，旧 Web index 继续可读。
-
-独立 JSON、目录成员和 ZIP 成员共用有界 hybrid 顶层数组解析器与单一导入事务。普通完整元素通常一次 C decoder 即成功；不确定或跨 chunk 的元素可能先有一次有界失败 fast probe，再由持久 lexical framer 处理，不会重复解码不断增长的前缀。每个元素仍受联合 byte/character/token/mapping/array/depth/integer/heap/node/batch 限制。
-
-文件通过 descriptor-bound stat/hash/read 校验身份；strict delete 在 staging 前拒绝，recovery 只处理历史项目自有 journal。Migration 只接受定义完全匹配的已知 predecessor；任何用户对象以错误类型、目标或定义占用 managed trigger/index 名称，都会在 DDL 前拒绝。
-
-非标准 JSON `NaN` / `Infinity`（包括 `1e9999` 这类溢出标准数值）会被拒绝；无效时间写成 `NULL` 并记录不含内容的 warning。默认 message API 只返回一份受 reader 预算限制的 `display_text`，并以 truncation/total-exactness metadata 说明能否完整恢复，不复制 `content_text`/`render_text` 别名。普通 CLI/Web 读取和默认 `/api/health` 使用有界 schema gate，不执行 `foreign_key_check`；`verify` 与 `/api/health?deep=true` 执行完整精确检查并提供 freshness 字段。每个多语句 CLI/Web 逻辑读取都在 schema/capability probe 前建立一个 SQLite read snapshot，流式响应正常结束或失败时均会释放。Effective-current、分页和 around-node 语义保持不变。
-
-“复制 URL”始终显式写入 `match_mode`、`layout`、`show_internal` 及可共享搜索/reader 状态。URL 显式值优先于 `localStorage`，缺失值才可回退本地设置。本版本使用 `replaceState`，浏览器前进/后退不会恢复逐步搜索或选择历史。
-
-长消息正文通过绑定内容 revision 的 opaque cursor 与 SQLite 增量 BLOB 读取分页；数字 offset 兼容扫描最多 1,048,576 字符，之后必须使用 cursor。raw preview 用一次可处理 NUL 的有界 BLOB 查询，并报告字节大小及其是否精确。可见文本中的 NUL 与孤立 surrogate 一致替换为 U+FFFD，raw JSON 保持安全转义。搜索结果中的 title/source/role/author/content-type 等标量有明确显示预算及 truncation/原长度元数据，ID 不会截断。
-
-CLI 与 Web 会话导出在物化前实施固定总边界：每个会话最多 100,000 个 node、单 node canonical/raw 输入最多 32 MiB、会话输入合计最多 128 MiB，流式输出最多 256 MiB；effective-current 在线物化同样限制为每会话 100,000 node 与 128 MiB 图 ID 输入。CLI 在目标目录分块写临时文件，同时计算哈希并流式比较旧文件，只原子替换变化内容。浏览器复制通过 `ReadableStream` 读取，超过 16 MiB UTF-8 或 8 Mi 字符就会在写剪贴板前取消并提示使用下载，绝不会复制 partial text。
-
-全归档导出只扫描一次 conversation 并写入同输出目录的临时 SQLite plan，在磁盘上分配冲突安全文件名，并流式产生 hash 与 JSONL/CSV manifest；上限为 1,000,000 个 conversation、1 GiB plan metadata、每个 manifest 2 GiB。全局 effective-current 上限为 100,000 个 conversation、1,000,000 node、512 MiB 图输入及 1 GiB 估算临时数据，batch 最多 20,000 row/node 与 64 MiB 输入。
-
-message search page 始终包含 `total_exact`；完成扫描时即使 `count_total=false` 也可为 true。`order_exact`、`scan_complete` 与 `provisional_order` 独立描述排序/扫描，存在 continuation 时 `next_offset=null`；conversation 搜索使用同一约定。around metadata 分开表示 found、effective-current membership、requested-path membership、visible 与 applied。空 canonical 或 legacy placeholder 可从有界、有效 raw text 恢复，流式 classifier 对任意前导空白保持 reader/search/index/copy/export 一致。
-
-仅筛选和仅排除可筛选 conversation；只有正向消息正文词才产生 message hit、reader 高亮和 hit navigation。“复制 URL”使用同一个已应用的搜索/list/selected context，不会混合 debounce 中的新输入。日语和西班牙语在选择器中明确标为部分翻译。release 在收集前验证独立的权威必要文件清单，任何必要源码、配置或文档缺失都会失败且不会覆盖旧 ZIP。
-
-请求校验响应最多包含 16 个安全项，每项只有白名单化的 `location`、`field` 和稳定公开 `code`，绝不回显 body、path/query 原值或框架校验类型。Raw API 分别报告精确 UTF-8 byte 与 character 单位。message search 的 candidate 精确验证、晚位置 snippet、enrichment 与序列化响应都有界；后续候选耗尽请求预算时不会丢弃已确认命中，响应会标记 partial/pending，并在可续扫时提供绑定 continuation。超过硬性逐行 verifier 上限的候选保持明确 pending，不会被伪装成 exact miss。Web index 计量实际读取、规范化与 FTS bind 的 byte。Release payload 以分块流式方式 hash、写入和复核。
-
-Python `zipfile` 与本项目导入流水线支持 ZIP64 结构，并有小型强制 ZIP64 member 回归测试；常规验收没有生成物理大小超过 4 GiB 的 ZIP。所有 member、byte、压缩比、磁盘和 CPU 限制仍然适用。
-
-长时间 CLI/Web 流式导出会有意保持同一个 SQLite read snapshot，直至完成、失败或客户端断开。在 WAL 模式下，长 reader 可能延迟 checkpoint 并在并发写入时造成 WAL 增长；持续时间、CPU/VM 工作、WAL 与临时磁盘仍随所选数据规模增长，不能通过破坏 snapshot 一致性来提前 checkpoint。
+导入、上传、搜索、复制、导出和数据库写入都使用有界输入与不含内容的安全错误。除非信任所在网络，否则只在回环地址运行 Web UI；验证成功前保留原始 ZIP，并为数据库、临时文件、WAL 和索引预留足够磁盘空间。
