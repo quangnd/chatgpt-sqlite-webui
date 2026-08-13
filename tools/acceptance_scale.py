@@ -43,6 +43,7 @@ from chatgpt_export_archiver.web_db import (  # noqa: E402
     create_web_indexes,
     release_writer_process_lock,
 )
+from tools.process_watchdog import terminate_kill_reap  # noqa: E402
 
 MOVED_SCALE_CASES = {
     "tests.test_round11.Round11RegressionTests."
@@ -103,6 +104,102 @@ def _worker_environment() -> dict[str, str]:
     env = os.environ.copy()
     env.pop("PYTHONTRACEMALLOC", None)
     return env
+
+
+def _validation_layers_from_observed_stages(
+    observed_stages: Iterable[str],
+    *,
+    retained_canonical_same_scale: bool,
+    indexed_source_same_scale: bool,
+    physical_zip_created: bool = True,
+) -> dict[str, bool]:
+    """Describe only validation layers for which this worker has evidence."""
+
+    evidence = _validation_evidence(
+        observed_stages,
+        physical_zip_created=physical_zip_created,
+    )
+    return {
+        "physical_zip": evidence["physical_zip_created"],
+        "selected_logical_json": evidence["selected_logical_json_identified"],
+        "json_parser": evidence["json_parser_completed"],
+        "retained_canonical_same_scale": bool(retained_canonical_same_scale),
+        "indexed_source_same_scale": bool(indexed_source_same_scale),
+        "http_multipart_upload": False,
+    }
+
+
+def _validation_status(
+    *,
+    outcome: str,
+    verify_ok: bool | None,
+    index_complete: bool,
+    capacity_probe: bool,
+) -> dict[str, bool]:
+    completed = outcome == "completed" and bool(verify_ok) and index_complete
+    capacity_blocked = outcome == "import_disk_space_insufficient"
+    return {
+        "capacity_blocked": capacity_blocked,
+        "validation_completed": completed,
+        "worker_failed": bool(
+            not completed and not (capacity_probe and capacity_blocked)
+        ),
+    }
+
+
+def _validation_evidence(
+    observed_stages: Iterable[str],
+    *,
+    physical_zip_created: bool,
+) -> dict[str, bool]:
+    """Map production/tool events to proof boundaries without inference."""
+
+    stages = set(observed_stages)
+    source_selected = "source_selection_completed" in stages
+    source_preflight = "source_preflight_completed" in stages
+    return {
+        "physical_zip_created": bool(physical_zip_created),
+        "source_selection_completed": source_selected,
+        "selected_logical_json_identified": source_selected,
+        "source_preflight_completed": source_preflight,
+        "zip_preflight_completed": source_preflight,
+        "disk_admission_completed": "disk_admission_completed" in stages,
+        "json_parser_entered": "json_parser_entered" in stages,
+        "json_parser_completed": "json_parser_completed" in stages,
+        "canonical_import_entered": "canonical_import_entered" in stages,
+        "canonical_import_committed": "canonical_import_committed" in stages,
+        "verify_completed": "verify_completed" in stages,
+        "web_index_completed": "web_index_completed" in stages,
+    }
+
+
+def _record_completed_stage(observed_stages: list[str], stage: str) -> None:
+    """Record a tool-owned completion boundary once."""
+
+    if stage not in observed_stages:
+        observed_stages.append(stage)
+
+
+class _ValidationStepError(RuntimeError):
+    def __init__(self, stage: str, error_type: str) -> None:
+        super().__init__(stage)
+        self.stage = stage
+        self.error_type = error_type
+
+
+def _run_validation_step(
+    observed_stages: list[str],
+    stage: str,
+    action,
+):
+    """Run one post-import proof step and expose only a safe failure type."""
+
+    try:
+        result = action()
+    except Exception as exc:
+        raise _ValidationStepError(stage, type(exc).__name__) from exc
+    _record_completed_stage(observed_stages, f"{stage}_completed")
+    return result
 
 
 def _measure(
@@ -753,6 +850,7 @@ def _retained_indexed_worker(
         capacity: dict[str, int] | None = None
         verify_ok: bool | None = None
         index_result: dict[str, Any] | None = None
+        validation_failure: dict[str, str] | None = None
         retained_content = retained_raw = retained_title = 0
         committed_conversations = committed_nodes = 0
         try:
@@ -766,7 +864,13 @@ def _retained_indexed_worker(
             conn = sqlite3.connect(database)
             conn.row_factory = sqlite3.Row
             try:
-                verify_ok = bool(verify_database(conn)["ok"])
+                verify_ok = bool(
+                    _run_validation_step(
+                        stages,
+                        "verify",
+                        lambda: verify_database(conn),
+                    )["ok"]
+                )
                 committed_conversations = int(conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0])
                 committed_nodes = int(conn.execute("SELECT COUNT(*) FROM conversation_nodes").fetchone()[0])
                 retained_content = int(conn.execute("SELECT COALESCE(SUM(length(CAST(content_text AS BLOB))),0) FROM conversation_nodes").fetchone()[0])
@@ -775,7 +879,17 @@ def _retained_indexed_worker(
             finally:
                 conn.close()
             if indexed:
-                index_result = create_web_indexes(database)
+                index_result = _run_validation_step(
+                    stages,
+                    "web_index",
+                    lambda: create_web_indexes(database),
+                )
+        except _ValidationStepError as exc:
+            outcome = f"{exc.stage}_failed"
+            validation_failure = {
+                "stage": exc.stage,
+                "error_type": exc.error_type,
+            }
         except (DiskSpaceInsufficientError, ImportPipelineError) as exc:
             if isinstance(exc, ImportPipelineError) and exc.code != "import_disk_space_insufficient":
                 raise
@@ -790,8 +904,17 @@ def _retained_indexed_worker(
             tracemalloc.stop()
         retained = retained_content + retained_raw + retained_title
         indexed_bytes = int((index_result or {}).get("input_materialized_bytes", 0))
-        completed = outcome == "completed" and bool(verify_ok) and (
-            not indexed or bool((index_result or {}).get("atomic_publish"))
+        status = _validation_status(
+            outcome=outcome,
+            verify_ok=verify_ok,
+            index_complete=(
+                not indexed or bool((index_result or {}).get("atomic_publish"))
+            ),
+            capacity_probe=capacity_probe,
+        )
+        evidence = _validation_evidence(
+            stages,
+            physical_zip_created=archive.is_file(),
         )
         return {
             "scenario": scenario,
@@ -812,20 +935,20 @@ def _retained_indexed_worker(
             "indexed_to_logical_ratio": indexed_bytes / logical_bytes,
             "outcome": outcome,
             "capacity": capacity,
+            "validation_failure": validation_failure,
             "validation_mode": "capacity_probe" if capacity_probe else "full_validation",
-            "validation_completed": completed,
-            "worker_failed": bool(not completed and not (capacity_probe and capacity is not None)),
+            **status,
+            **evidence,
             "verify_ok": verify_ok,
             "web_index_complete": bool((index_result or {}).get("atomic_publish")) if indexed else None,
             "observed_stages": stages,
-            "validation_layers": {
-                "physical_zip": True,
-                "selected_logical_json": True,
-                "json_parser": "json_parse_started" in stages,
-                "retained_canonical_same_scale": retained >= logical_bytes // 2,
-                "indexed_source_same_scale": indexed_bytes >= logical_bytes // 4 if indexed else False,
-                "http_multipart_upload": False,
-            },
+            "validation_layers": _validation_layers_from_observed_stages(
+                stages,
+                retained_canonical_same_scale=retained >= logical_bytes // 2,
+                indexed_source_same_scale=(
+                    indexed_bytes >= logical_bytes // 4 if indexed else False
+                ),
+            ),
             "wall_seconds": time.perf_counter() - started_wall,
             "cpu_seconds": time.process_time() - started_cpu,
             "peak_rss_bytes": _rss_bytes(),
@@ -898,6 +1021,7 @@ def _valid_data_worker(
         summary: dict[str, Any] | None = None
         index_result: dict[str, Any] | None = None
         verify_ok: bool | None = None
+        validation_failure: dict[str, str] | None = None
         committed_conversations = 0
         committed_nodes = 0
         skipped_elements = 0
@@ -917,7 +1041,13 @@ def _valid_data_worker(
             conn = sqlite3.connect(database)
             conn.row_factory = sqlite3.Row
             try:
-                verify_ok = bool(verify_database(conn)["ok"])
+                verify_ok = bool(
+                    _run_validation_step(
+                        observed_stages,
+                        "verify",
+                        lambda: verify_database(conn),
+                    )["ok"]
+                )
                 committed_conversations = int(
                     conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
                 )
@@ -963,7 +1093,17 @@ def _valid_data_worker(
                     f"skipped={skipped_elements} warnings={warning_count} "
                     f"expected_committed={element_count}"
                 )
-            index_result = create_web_indexes(database)
+            index_result = _run_validation_step(
+                observed_stages,
+                "web_index",
+                lambda: create_web_indexes(database),
+            )
+        except _ValidationStepError as exc:
+            outcome = f"{exc.stage}_failed"
+            validation_failure = {
+                "stage": exc.stage,
+                "error_type": exc.error_type,
+            }
         except (DiskSpaceInsufficientError, ImportPipelineError) as exc:
             if (
                 isinstance(exc, ImportPipelineError)
@@ -999,6 +1139,10 @@ def _valid_data_worker(
             int(index_result.get("input_materialized_bytes", 0))
             if index_result else 0
         )
+        evidence = _validation_evidence(
+            observed_stages,
+            physical_zip_created=archive.is_file(),
+        )
         result = {
             "scenario": "physical-logical-parser-gib",
             "tier": size_gib,
@@ -1026,14 +1170,15 @@ def _valid_data_worker(
             "outcome": outcome,
             "validation_mode": "capacity_probe" if capacity_probe else "full_validation",
             "observed_stages": observed_stages,
-            "capacity_blocked": outcome == "import_disk_space_insufficient",
-            "validation_completed": outcome == "completed" and bool(verify_ok) and bool(index_result),
-            "worker_failed": bool(
-                outcome != "completed" and not (
-                    capacity_probe and outcome == "import_disk_space_insufficient"
-                )
+            **_validation_status(
+                outcome=outcome,
+                verify_ok=verify_ok,
+                index_complete=bool(index_result),
+                capacity_probe=capacity_probe,
             ),
+            **evidence,
             "capacity": capacity,
+            "validation_failure": validation_failure,
             "verify_ok": verify_ok,
             "web_index_complete": (
                 bool(index_result.get("atomic_publish")) if index_result else None
@@ -1050,14 +1195,11 @@ def _valid_data_worker(
             "upload_spool_peak_bytes": None,
             "execution_path": "cli_local_file",
             "http_upload_validated": False,
-            "validation_layers": {
-                "physical_zip": True,
-                "selected_logical_json": True,
-                "json_parser": "json_parse_started" in observed_stages,
-                "retained_canonical_same_scale": False,
-                "indexed_source_same_scale": False,
-                "http_multipart_upload": False,
-            },
+            "validation_layers": _validation_layers_from_observed_stages(
+                observed_stages,
+                retained_canonical_same_scale=False,
+                indexed_source_same_scale=False,
+            ),
             "diagnostic_limitations": [
                 "end-of-run file sizes are not filesystem peaks",
                 "SQLite TEMP and in-database live/staging object peaks are unobserved",
@@ -1082,12 +1224,20 @@ def _valid_data_worker(
 
 
 def _resource_stress_worker(
-    size_gib: int, *, trace_allocations: bool
+    size_gib: int,
+    *,
+    trace_allocations: bool,
+    capacity_probe: bool = False,
+    _target_bytes: int | None = None,
 ) -> dict[str, Any]:
     """Exercise large invalid elements plus one valid tail without mislabelling it."""
     import sqlite3
 
-    target_bytes = size_gib * 1024 * 1024 * 1024
+    target_bytes = (
+        size_gib * 1024 * 1024 * 1024
+        if _target_bytes is None
+        else int(_target_bytes)
+    )
     maximum_element_bytes = 30 * 1024 * 1024
     valid_tail = (
         b'{"id":"resource-valid","conversation_id":"resource-valid",'
@@ -1141,6 +1291,7 @@ def _resource_stress_worker(
         capacity: dict[str, int] | None = None
         verify_ok: bool | None = None
         index_result: dict[str, Any] | None = None
+        validation_failure: dict[str, str] | None = None
         committed_conversations = 0
         committed_nodes = 0
         skipped_elements = 0
@@ -1148,17 +1299,27 @@ def _resource_stress_worker(
         retained_content_text_bytes = 0
         retained_raw_message_bytes = 0
         retained_title_bytes = 0
+        observed_stages: list[str] = []
         try:
             run_import_pipeline(
                 database,
                 str(archive),
                 cwd=base,
                 no_input_sha256=False,
+                progress_callback=lambda stage, _summary: observed_stages.append(
+                    stage
+                ),
             )
             conn = sqlite3.connect(database)
             conn.row_factory = sqlite3.Row
             try:
-                verify_ok = bool(verify_database(conn)["ok"])
+                verify_ok = bool(
+                    _run_validation_step(
+                        observed_stages,
+                        "verify",
+                        lambda: verify_database(conn),
+                    )["ok"]
+                )
                 committed_conversations = int(
                     conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
                 )
@@ -1194,7 +1355,17 @@ def _resource_stress_worker(
                 or warning_count < element_count
             ):
                 raise RuntimeError("resource_stress_import_contract_mismatch")
-            index_result = create_web_indexes(database)
+            index_result = _run_validation_step(
+                observed_stages,
+                "web_index",
+                lambda: create_web_indexes(database),
+            )
+        except _ValidationStepError as exc:
+            outcome = f"{exc.stage}_failed"
+            validation_failure = {
+                "stage": exc.stage,
+                "error_type": exc.error_type,
+            }
         except (DiskSpaceInsufficientError, ImportPipelineError) as exc:
             if isinstance(exc, ImportPipelineError) and exc.code != "import_disk_space_insufficient":
                 raise
@@ -1218,6 +1389,10 @@ def _resource_stress_worker(
         indexed_source_bytes = (
             int(index_result.get("input_materialized_bytes", 0))
             if index_result else 0
+        )
+        evidence = _validation_evidence(
+            observed_stages,
+            physical_zip_created=archive.is_file(),
         )
         result = {
             "scenario": "resource-stress-gib",
@@ -1244,7 +1419,21 @@ def _resource_stress_worker(
             "skipped_invalid_elements": skipped_elements,
             "warning_count": warning_count,
             "outcome": outcome,
+            "validation_mode": (
+                "capacity_probe" if capacity_probe else "full_validation"
+            ),
+            "observed_stages": observed_stages,
+            **_validation_status(
+                outcome=outcome,
+                verify_ok=verify_ok,
+                index_complete=bool(
+                    index_result and index_result.get("atomic_publish")
+                ),
+                capacity_probe=capacity_probe,
+            ),
+            **evidence,
             "capacity": capacity,
+            "validation_failure": validation_failure,
             "verify_ok": verify_ok,
             "web_index_complete": bool(index_result.get("atomic_publish")) if index_result else None,
             "indexed_message_bytes": indexed_source_bytes,
@@ -1259,14 +1448,11 @@ def _resource_stress_worker(
             "upload_spool_peak_bytes": None,
             "execution_path": "cli_local_file",
             "http_upload_validated": False,
-            "validation_layers": {
-                "physical_zip": True,
-                "selected_logical_json": True,
-                "json_parser": True,
-                "retained_canonical_same_scale": False,
-                "indexed_source_same_scale": False,
-                "http_multipart_upload": False,
-            },
+            "validation_layers": _validation_layers_from_observed_stages(
+                observed_stages,
+                retained_canonical_same_scale=False,
+                indexed_source_same_scale=False,
+            ),
             "diagnostic_limitations": [
                 "invalid elements are intentionally skipped",
                 "end-of-run file sizes are not filesystem peaks",
@@ -1305,7 +1491,11 @@ def _worker(args: argparse.Namespace) -> dict[str, Any]:
     if args.scenario == "registry-lifecycle":
         return _registry_lifecycle_worker(args.tier, trace_allocations=trace_allocations)
     if args.scenario == "resource-stress-gib":
-        return _resource_stress_worker(args.tier, trace_allocations=trace_allocations)
+        return _resource_stress_worker(
+            args.tier,
+            trace_allocations=trace_allocations,
+            capacity_probe=args.capacity_probe,
+        )
     if args.scenario in {"physical-logical-parser-gib", "valid-data-gib"}:
         return _valid_data_worker(
             args.tier,
@@ -1349,6 +1539,19 @@ def _aggregate(samples: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _terminate_kill_reap(
+    process: subprocess.Popen[str],
+    *,
+    timeout_seconds: float = 0.75,
+    owned_process_group: bool = False,
+) -> tuple[str, str, dict[str, Any]]:
+    return terminate_kill_reap(
+        process,
+        timeout_seconds=timeout_seconds,
+        owned_process_group=owned_process_group,
+    )
+
+
 def _run_worker_subprocess(
     command: list[str],
     *,
@@ -1368,17 +1571,16 @@ def _run_worker_subprocess(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=_worker_environment(),
+        start_new_session=os.name == "posix",
     )
     deadline = started + hard_timeout_seconds
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            process.terminate()
-            try:
-                stdout, stderr = process.communicate(timeout=0.25)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                stdout, stderr = process.communicate(timeout=0.25)
+            stdout, stderr, lifecycle = _terminate_kill_reap(
+                process,
+                owned_process_group=True,
+            )
             return {
                 "scenario": scenario,
                 "tier": tier,
@@ -1390,7 +1592,8 @@ def _run_worker_subprocess(
                 "tracemalloc_peak_bytes": None,
                 "hard_timeout": True,
                 "partial": True,
-                "worker_return_code": process.returncode,
+                **lifecycle,
+                "worker_return_code": lifecycle["return_code"],
                 "worker_stdout_present": bool(stdout),
                 "worker_stderr_present": bool(stderr),
             }
@@ -1427,6 +1630,12 @@ def _run_worker_subprocess(
             "tracemalloc_peak_bytes": None,
             "hard_timeout": False,
             "partial": True,
+            "child_pid": process.pid,
+            "return_code": process.returncode,
+            "terminate_attempted": False,
+            "kill_attempted": False,
+            "reaped": process.poll() is not None,
+            "reap_incomplete": process.poll() is None,
             "worker_failed": True,
             "worker_return_code": process.returncode,
             "worker_stderr_present": bool(stderr),
@@ -1445,12 +1654,24 @@ def _run_worker_subprocess(
             "tracemalloc_peak_bytes": None,
             "hard_timeout": False,
             "partial": True,
+            "child_pid": process.pid,
+            "return_code": process.returncode,
+            "terminate_attempted": False,
+            "kill_attempted": False,
+            "reaped": process.poll() is not None,
+            "reap_incomplete": process.poll() is None,
             "worker_output_invalid": True,
             "worker_return_code": process.returncode,
             "worker_stderr_present": bool(stderr),
         }
     result["hard_timeout"] = False
     result["partial"] = False
+    result["child_pid"] = process.pid
+    result["return_code"] = process.returncode
+    result["terminate_attempted"] = False
+    result["kill_attempted"] = False
+    result["reaped"] = process.poll() is not None
+    result["reap_incomplete"] = process.poll() is None
     return result
 
 

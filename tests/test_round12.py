@@ -681,6 +681,9 @@ class Round12Regressions(unittest.TestCase):
         self.assertEqual(payload["schema"], "chatgpt-sqlite-webui-real-pipeline-v3")
         self.assertEqual(payload["aggregate"]["successful_runs"], 1)
         self.assertTrue(payload["samples"][0]["cleanup"]["complete"])
+        self.assertTrue(payload["canonical_runs_success"])
+        self.assertTrue(payload["synthetic_fixture_cleanup"]["complete"])
+        self.assertTrue(payload["acceptance_success"])
         sample = payload["samples"][0]
         self.assertEqual(
             sample["timing_semantics"]["formal_threshold"],
@@ -701,6 +704,19 @@ class Round12Regressions(unittest.TestCase):
         self.assertIn("required_cleanup", sample["resource_sampler"]["observed_stages"])
         self.assertTrue(sample["resource_sampler"]["coverage_complete"])
         self.assertFalse(sample["resource_sampler"]["sampler_cleanup_failed"])
+        process_backend = sample["resource_sampler"]["process_sample_backend"]
+        self.assertIn(process_backend, {"darwin_libproc", "linux_procfs", "unavailable"})
+        self.assertGreaterEqual(
+            sample["resource_sampler"]["sampling_overhead_wall_seconds"], 0
+        )
+        if process_backend == "unavailable":
+            self.assertIsNone(sample["child_cpu_seconds"])
+        else:
+            self.assertGreaterEqual(sample["child_cpu_seconds"], 0)
+        self.assertEqual(
+            sample["resource_sampler"]["process_cpu_semantics"],
+            "target_server_process_only",
+        )
         self.assertIsNone(
             sample["resource_sampler"]["sqlite_unlinked_temp_bytes"]
         )
@@ -731,6 +747,33 @@ class Round12Regressions(unittest.TestCase):
                     failed_payload["samples"][0]["cleanup"]["error_type"],
                     expected_error,
                 )
+
+        outer_cleanup = subprocess.run(
+            [
+                sys.executable,
+                str(root / "tools" / "acceptance_real_pipeline.py"),
+                "--self-test-outer-cleanup-failure",
+                "--python",
+                sys.executable,
+            ],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            env=child_env,
+        )
+        self.assertNotEqual(outer_cleanup.returncode, 0)
+        outer_payload = json.loads(outer_cleanup.stdout)
+        self.assertTrue(outer_payload["canonical_runs_success"])
+        self.assertFalse(outer_payload["synthetic_fixture_cleanup"]["complete"])
+        self.assertFalse(outer_payload["outer_cleanup_complete"])
+        self.assertEqual(outer_payload["outer_cleanup_warning"], "PermissionError")
+        self.assertTrue(outer_payload["outer_cleanup_remaining_owned_path"])
+        self.assertTrue(
+            outer_payload["synthetic_fixture_cleanup"]["recovery_cleanup"][
+                "complete"
+            ]
+        )
+        self.assertFalse(outer_payload["acceptance_success"])
 
         slow_cleanup = subprocess.run(
             [

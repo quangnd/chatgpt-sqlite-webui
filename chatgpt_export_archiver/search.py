@@ -77,6 +77,10 @@ MAX_SEARCH_CONTINUATION_LENGTH = 4096
 MAX_SEARCH_CONTINUATION_ID_CHARS = 16 * 1024
 SEARCH_CONTINUATION_SESSION_TTL_SECONDS = 15 * 60
 SEARCH_CONTINUATION_SESSION_LIMIT = 128
+RAW_DISPLAY_ANCHOR_SESSION_TTL_SECONDS = 15 * 60
+RAW_DISPLAY_ANCHOR_SESSION_LIMIT = 128
+RAW_DISPLAY_ANCHOR_SESSION_MAX_BYTES = SEARCH_REQUEST_VERIFY_BYTES
+RAW_DISPLAY_ANCHOR_SESSION_MAX_CHARS = SEARCH_REQUEST_VERIFY_CHARS
 SEARCH_RAW_EXACT_MAX_BYTES = 1024 * 1024
 SEARCH_RAW_EXACT_MAX_CHARS = 800_000
 SEARCH_RAW_CONTINUATION_TIERS = (5 * 1024 * 1024, 20 * 1024 * 1024)
@@ -96,6 +100,10 @@ _SEARCH_CONTINUATION_SESSIONS: OrderedDict[
     str, tuple[float, dict[str, Any]]
 ] = OrderedDict()
 _SEARCH_CONTINUATION_SESSIONS_LOCK = threading.Lock()
+_RAW_DISPLAY_ANCHOR_SESSIONS: OrderedDict[
+    str, tuple[float, dict[str, Any]]
+] = OrderedDict()
+_RAW_DISPLAY_ANCHOR_SESSIONS_LOCK = threading.Lock()
 
 
 def _bounded_scalar_projection(expression: str, alias: str, limit: int) -> str:
@@ -219,7 +227,7 @@ def _decode_display_cursor(
         or
         not isinstance(identity, str) or len(identity) > 128
         or not isinstance(revision, str) or len(revision) > 256
-        or source not in {"canonical", "raw_fallback"}
+        or source not in {"canonical", "raw_fallback", "raw_fallback_anchor"}
         or isinstance(byte_offset, bool) or not isinstance(byte_offset, int)
         or byte_offset < 0 or byte_offset > MAX_SQLITE_CURSOR_OFFSET
         or isinstance(char_offset, bool) or not isinstance(char_offset, int)
@@ -229,6 +237,63 @@ def _decode_display_cursor(
     if database_identity != database_identity_expected:
         raise DisplayCursorError("display_cursor_stale")
     return identity, revision, source, byte_offset, char_offset
+
+
+def _raw_display_anchor_session_totals() -> tuple[int, int]:
+    """Return unique retained-text totals while the session lock is held."""
+
+    seen: set[str] = set()
+    total_bytes = 0
+    total_chars = 0
+    for cursor, (_deadline, value) in _RAW_DISPLAY_ANCHOR_SESSIONS.items():
+        artifact_id = str(value.get("artifact_id") or cursor)
+        if artifact_id in seen:
+            continue
+        seen.add(artifact_id)
+        total_bytes += int(value.get("retained_bytes") or 0)
+        total_chars += int(value.get("total_chars") or 0)
+    return total_bytes, total_chars
+
+
+def _store_raw_display_anchor(cursor: str, artifact: Mapping[str, Any]) -> bool:
+    """Retain one verified body behind bounded opaque cursor aliases."""
+
+    now = time.monotonic()
+    expires = now + RAW_DISPLAY_ANCHOR_SESSION_TTL_SECONDS
+    with _RAW_DISPLAY_ANCHOR_SESSIONS_LOCK:
+        expired = [
+            key
+            for key, (deadline, _value) in _RAW_DISPLAY_ANCHOR_SESSIONS.items()
+            if deadline <= now
+        ]
+        for key in expired:
+            _RAW_DISPLAY_ANCHOR_SESSIONS.pop(key, None)
+        _RAW_DISPLAY_ANCHOR_SESSIONS[cursor] = (expires, dict(artifact))
+        _RAW_DISPLAY_ANCHOR_SESSIONS.move_to_end(cursor)
+        while _RAW_DISPLAY_ANCHOR_SESSIONS:
+            total_bytes, total_chars = _raw_display_anchor_session_totals()
+            if (
+                len(_RAW_DISPLAY_ANCHOR_SESSIONS) <= RAW_DISPLAY_ANCHOR_SESSION_LIMIT
+                and total_bytes <= RAW_DISPLAY_ANCHOR_SESSION_MAX_BYTES
+                and total_chars <= RAW_DISPLAY_ANCHOR_SESSION_MAX_CHARS
+            ):
+                return cursor in _RAW_DISPLAY_ANCHOR_SESSIONS
+            _RAW_DISPLAY_ANCHOR_SESSIONS.popitem(last=False)
+        return False
+
+
+def _load_raw_display_anchor(cursor: str) -> dict[str, Any] | None:
+    now = time.monotonic()
+    with _RAW_DISPLAY_ANCHOR_SESSIONS_LOCK:
+        entry = _RAW_DISPLAY_ANCHOR_SESSIONS.get(cursor)
+        if entry is None:
+            return None
+        expires, artifact = entry
+        if expires <= now:
+            _RAW_DISPLAY_ANCHOR_SESSIONS.pop(cursor, None)
+            return None
+        _RAW_DISPLAY_ANCHOR_SESSIONS.move_to_end(cursor)
+        return dict(artifact)
 
 
 def _read_utf8_blob_chunk(blob: sqlite3.Blob, byte_offset: int, char_limit: int) -> tuple[str, int, bool, bool]:
@@ -950,9 +1015,33 @@ def _ensure_search_functions(
             raw,
             max_raw_chars=min(verify_chars, raw_verify_chars),
         )
+        if raw and resolved != visible_content:
+            terms = _highlight_terms(parsed) if parsed is not None else []
+            source_span = _first_source_match_span(resolved, terms)
+            snippet, _snippet_offset = _make_snippet_with_position(
+                resolved,
+                terms,
+                parsed.match_mode if parsed is not None else "contains",
+                scan_chars=len(resolved),
+            )
+            if source_span is not None:
+                state["verified_artifacts"][storage_rowid] = {
+                    "preview": resolved[:SEARCH_HIT_PREVIEW_CHARS],
+                    "total_chars": len(resolved),
+                    "snippet": snippet,
+                    "match_char_offset": source_span[0],
+                    "match_length": source_span[1] - source_span[0],
+                    "matched_term": source_span[2],
+                    "source_byte_offset": _utf8_prefix_bytes(
+                        resolved, source_span[0]
+                    ),
+                    "source_kind": "raw_fallback",
+                    "resolved_text": resolved,
+                    "retained_bytes": raw_size,
+                }
         if total_chars > SEARCH_CANDIDATE_SCAN_CHARS:
             state["long_proxy_cache"][storage_rowid] = resolved
-            if possible_placeholder:
+            if possible_placeholder and storage_rowid not in state["verified_artifacts"]:
                 terms = _highlight_terms(parsed) if parsed is not None else []
                 source_span = _first_source_match_span(resolved, terms)
                 snippet, _snippet_offset = _make_snippet_with_position(
@@ -2542,7 +2631,10 @@ def get_message_display_chunk(
         if (
             cursor_identity != _display_cursor_identity(conversation_id, node_id)
             or cursor_revision != revision
-            or char_offset != offset
+            or (
+                cursor_source != "raw_fallback_anchor"
+                and char_offset != offset
+            )
         ):
             raise DisplayCursorError("display_cursor_stale")
     resolver_input_truncated = False
@@ -2560,6 +2652,93 @@ def get_message_display_chunk(
             content_storage_bytes,
             max_bytes=SEARCH_EXACT_VERIFY_BYTES,
         )
+    if cursor_state is not None and cursor_state[2] == "raw_fallback_anchor":
+        raw_presence = conn.execute(
+            "SELECT raw_message_json IS NOT NULL FROM conversation_nodes WHERE rowid = ?",
+            (storage_rowid,),
+        ).fetchone()
+        if placeholder_exact is False or not raw_presence or not bool(raw_presence[0]):
+            raise DisplayCursorError("display_cursor_stale")
+        anchor = _load_raw_display_anchor(cursor)
+        if anchor is None:
+            raise DisplayCursorError("display_cursor_stale")
+        expected_identity = _display_cursor_identity(conversation_id, node_id)
+        if (
+            anchor.get("identity") != expected_identity
+            or anchor.get("revision") != revision
+            or anchor.get("source") != "raw_fallback_anchor"
+        ):
+            raise DisplayCursorError("display_cursor_stale")
+        resolved_text = anchor.get("resolved_text")
+        total_chars = anchor.get("total_chars")
+        if (
+            not isinstance(resolved_text, str)
+            or isinstance(total_chars, bool)
+            or not isinstance(total_chars, int)
+            or total_chars < 0
+            or len(resolved_text) != total_chars
+        ):
+            raise DisplayCursorError("display_cursor_stale")
+        initial_anchor_offset = anchor.get("initial_anchor_offset")
+        cursor_offset = anchor.get("cursor_offset")
+        initial_cursor = bool(anchor.get("initial_cursor"))
+        if (
+            isinstance(initial_anchor_offset, bool)
+            or not isinstance(initial_anchor_offset, int)
+            or initial_anchor_offset < 0
+            or isinstance(cursor_offset, bool)
+            or not isinstance(cursor_offset, int)
+            or cursor_offset != char_offset
+            or (not initial_cursor and offset != char_offset)
+            or (initial_cursor and offset not in {0, initial_anchor_offset})
+        ):
+            raise DisplayCursorError("display_cursor_stale")
+        desired_start = (
+            max(0, initial_anchor_offset - min(limit // 2, 4096))
+            if initial_cursor and offset == initial_anchor_offset
+            else offset
+        )
+        chunk = resolved_text[desired_start : desired_start + limit]
+        next_offset = desired_start + len(chunk)
+        has_more = next_offset < total_chars
+        next_cursor = None
+        if has_more:
+            next_cursor = _encode_display_cursor(
+                database_token_identity,
+                _display_cursor_identity(conversation_id, node_id),
+                revision,
+                _utf8_prefix_bytes(resolved_text, next_offset),
+                next_offset,
+                source="raw_fallback_anchor",
+            )
+            next_artifact = dict(anchor)
+            next_artifact["cursor_offset"] = next_offset
+            next_artifact["initial_cursor"] = False
+            if not _store_raw_display_anchor(next_cursor, next_artifact):
+                raise DisplayCursorError("display_cursor_stale")
+        anchor_offset_in_chunk = (
+            initial_anchor_offset - desired_start
+            if desired_start <= initial_anchor_offset < desired_start + len(chunk)
+            else None
+        )
+        return {
+            "conversation_id": conversation_id,
+            "node_id": node_id,
+            "display_text": chunk,
+            "offset": desired_start,
+            "returned_chars": len(chunk),
+            "total_chars": total_chars,
+            "total_chars_exact": True,
+            "has_more": has_more,
+            "next_offset": next_offset if has_more else None,
+            "next_cursor": next_cursor,
+            "content_revision": revision,
+            "max_chunk_chars": budget.display_chunk_chars,
+            "resolver_input_truncated": False,
+            "source": "raw_fallback",
+            "anchor_char_offset": initial_anchor_offset,
+            "anchor_offset_in_chunk": anchor_offset_in_chunk,
+        }
     if prefix_bytes and placeholder_exact is False:
         if cursor_state is not None and cursor_state[2] != "canonical":
             raise DisplayCursorError("display_cursor_stale")
@@ -4998,7 +5177,15 @@ def _message_search_payload(
 ) -> dict[str, Any]:
     resolved_text = row["content_text"] or ""
     storage_bytes = int(row["content_storage_bytes"] or 0)
-    if storage_bytes > SEARCH_CANDIDATE_SCAN_CHARS and verified_artifact is not None:
+    artifact_source = (
+        str(verified_artifact.get("source_kind") or "canonical")
+        if verified_artifact is not None
+        else "canonical"
+    )
+    if verified_artifact is not None and (
+        storage_bytes > SEARCH_CANDIDATE_SCAN_CHARS
+        or artifact_source == "raw_fallback"
+    ):
         text = str(verified_artifact["preview"])
         total_chars = int(verified_artifact["total_chars"])
         snippet = str(verified_artifact["snippet"])
@@ -5089,6 +5276,43 @@ def _message_search_payload(
         )
         else None
     )
+    if (
+        source_kind == "raw_fallback"
+        and source_byte_offset is not None
+        and match_char_offset is not None
+        and verified_artifact is not None
+        and isinstance(verified_artifact.get("resolved_text"), str)
+    ):
+        display_anchor_cursor = _encode_display_cursor(
+            _database_token_identity(conn),
+            _display_cursor_identity(
+                str(row["conversation_id"]), str(row["node_id"])
+            ),
+            display_anchor_revision,
+            int(source_byte_offset),
+            int(match_char_offset),
+            source="raw_fallback_anchor",
+        )
+        stored = _store_raw_display_anchor(
+            display_anchor_cursor,
+            {
+                "artifact_id": secrets.token_hex(16),
+                "identity": _display_cursor_identity(
+                    str(row["conversation_id"]), str(row["node_id"])
+                ),
+                "revision": display_anchor_revision,
+                "source": "raw_fallback_anchor",
+                "match_char_offset": int(match_char_offset),
+                "initial_anchor_offset": int(match_char_offset),
+                "cursor_offset": int(match_char_offset),
+                "initial_cursor": True,
+                "resolved_text": str(verified_artifact["resolved_text"]),
+                "retained_bytes": int(verified_artifact.get("retained_bytes") or 0),
+                "total_chars": int(total_chars),
+            },
+        )
+        if not stored:
+            display_anchor_cursor = None
     return {
         "conversation_id": row["conversation_id"],
         "node_id": row["node_id"],

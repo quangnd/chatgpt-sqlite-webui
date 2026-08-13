@@ -812,7 +812,7 @@ def create_api_router(
                 },
                 "page_budget_fields": ["page_text_budget_exhausted", "page_preview_budget_exhausted", "page_highlight_budget_exhausted", "response_budget_estimated", "response_budget_limit", "response_budget_estimate_exhausted"],
                 "display_endpoint": "/api/by-id/display?conversation_id=...&node_id=...&offset=0&limit=65536",
-                "display_cursor": "next_cursor is a revision-bound, signed, canonically encoded opaque sequential cursor. Search hits may also return display_anchor_cursor, bound to the canonical source field, row identity, row revision, source code-point position, and direct UTF-8 byte seek; stale revisions return display_cursor_stale (409). Numeric offset is a compatibility scan capped at 1048576 characters and larger values return display_cursor_required (409). Browser copy discards every partial character after invalid/stale cursor and retries once from offset zero; a second failure performs no clipboard write.",
+                "display_cursor": "next_cursor is a revision-bound, signed, canonically encoded opaque sequential cursor. Search hits may also return display_anchor_cursor bound to database identity, row identity, row revision, source kind, and source code-point position. Canonical anchors use a direct UTF-8 byte seek. A verified raw-fallback hit keeps its already-resolved body in a byte-, character-, count-, and time-bounded process-local session, so the hit can be shown near its match or streamed from offset zero without reparsing the raw row on every chunk. Each continuation has a strictly advancing signed offset and an exact total. A changed row, changed source, expired or evicted session, or server restart returns display_cursor_stale (409). Numeric offset is a compatibility scan capped at 1048576 characters and larger values return display_cursor_required (409). Browser copy discards every partial character after invalid/stale cursor and retries once from offset zero; a second failure performs no clipboard write.",
                 "hidden_counts": {
                     "fields": ["visible_total", "empty_hidden_count", "internal_hidden_count", "technical_hidden_count"],
                     "contract": "internal_hidden_count is the one canonical non-empty internal-node count; technical_hidden_count is a deprecated exact alias retained for compatibility",
@@ -1054,8 +1054,8 @@ def create_api_router(
             },
             "ui_state": {
                 "canonical_copy_url": ["match_mode", "layout", "show_internal", "sort", "path", "scope", "q", "role", "title", "exact", "exclude", "source", "after", "before", "selected conversation"],
+                "browser_history": "Back/Forward restores committed searches, filters, sort/path, selected conversation, layout, and internal-message visibility. Live text entry replaces one reserved history item rather than creating an entry per keystroke; popstate aborts stale list/detail requests before restoration.",
                 "url_precedence": "explicit URL values win over localStorage; missing values may use local settings",
-                "back_forward": "incremental search and selection history restoration is not implemented; routine address-bar updates use replaceState",
             },
             "database_compatibility": {
                 "readonly_contract": "health and read endpoints inspect schema but never execute migration DDL",

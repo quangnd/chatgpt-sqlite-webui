@@ -4,7 +4,7 @@ import ConversationPane from "./components/ConversationPane";
 import SearchHelp from "./components/SearchHelp";
 import SettingsPanel from "./components/SettingsPanel";
 import { ApiError, cancelWebIndex, getConversation, getConversations, getHealth, getImportJob, getStats, uploadImportZip } from "./api/client";
-import { applySettings, clampSettings, loadSettings, saveSettings, type Settings } from "./settings";
+import { applySettings, clampSettings, loadSettings, saveSettings, type MessageLayout, type Settings } from "./settings";
 import { createTranslator } from "./i18n";
 import type { CleanupWarning, ConversationSummary, Health, ImportJob, MatchMode, PathMode, SearchDiagnostics, SearchFilters, SearchScope, SortMode, Stats } from "./types";
 import { isInteractiveTarget } from "./utils/interaction";
@@ -101,20 +101,33 @@ function loadMatchMode(): MatchMode {
   }
 }
 
-function readUrlParams(): {
+interface UrlViewState {
   query: string;
   sort: SortMode;
   path: PathMode;
   matchMode: MatchMode;
   selectedId: string | null;
   filters: SearchFilters;
-} {
+  layout: MessageLayout;
+  showInternal: boolean;
+}
+
+function readUrlParams(useStoredMatchMode = true): UrlViewState {
   const params = new URLSearchParams(window.location.search);
   const query = params.get("q") || "";
   const sort = (params.get("sort") as SortMode) || "relevance";
   const path = (params.get("path") as PathMode) || "current";
-  const matchMode = loadMatchMode();
+  const rawMatchMode = params.get("match_mode") || params.get("matchMode");
+  const matchMode: MatchMode = rawMatchMode === "word"
+    ? "word"
+    : rawMatchMode === "contains"
+      ? "contains"
+      : useStoredMatchMode
+        ? loadMatchMode()
+        : "contains";
   const selectedId = params.get("conversation") || null;
+  const layout = params.get("layout") === "classic" ? "classic" : "chat";
+  const showInternal = params.get("show_internal") === "true";
   const allowedSorts: SortMode[] = ["relevance", "newest", "oldest", "updated", "created", "title"];
   const allowedPaths: PathMode[] = ["current", "all"];
   const allowedScopes: SearchScope[] = ["all", "title", "message"];
@@ -141,10 +154,12 @@ function readUrlParams(): {
     matchMode,
     selectedId,
     filters,
+    layout,
+    showInternal,
   };
 }
 
-function syncUrlState(state: {
+type ShareableViewState = {
   q: string;
   sort: string;
   path: string;
@@ -153,7 +168,25 @@ function syncUrlState(state: {
   filters: SearchFilters;
   layout: string;
   showInternal: boolean;
-}) {
+};
+
+function shareableStateKey(state: ShareableViewState): string {
+  return JSON.stringify({
+    q: state.q,
+    sort: state.sort,
+    path: state.path,
+    matchMode: state.matchMode,
+    selectedId: state.selectedId,
+    filters: state.filters,
+    layout: state.layout,
+    showInternal: state.showInternal,
+  });
+}
+
+function syncUrlState(
+  state: ShareableViewState,
+  mode: "replace" | "push" = "replace",
+) {
   try {
     const params = new URLSearchParams();
     if (state.q) params.set("q", state.q);
@@ -174,10 +207,11 @@ function syncUrlState(state: {
     const query = params.toString();
     const url = query ? `${window.location.pathname}?${query}` : window.location.pathname;
     if (url !== `${window.location.pathname}${window.location.search}`) {
-      // Keep refresh/share URLs current without creating a history entry per keystroke.
-      // Back/Forward restoration should be added with deliberate pushState boundaries
-      // for submitted searches or conversation selection, not from this hot path.
-      window.history.replaceState(null, "", url);
+      window.history[mode === "push" ? "pushState" : "replaceState"](
+        { chatgptArchiveView: true },
+        "",
+        url,
+      );
     }
   } catch {
     // URL sync is best-effort.
@@ -226,7 +260,14 @@ function importStageLabel(t: (key: string) => string, stage: string): string {
     upload: t("stageUpload"),
     import: t("stageImport"),
     importing: t("stageImport"),
+    source_selection_completed: t("stageImport"),
+    source_preflight_completed: t("stageImport"),
+    disk_admission_completed: t("stageImport"),
     source_scan_complete: t("stageImport"),
+    json_parser_entered: t("stageImport"),
+    json_parser_completed: t("stageImport"),
+    canonical_import_entered: t("stageImport"),
+    canonical_import_committed: t("stageImport"),
     shard_complete: t("stageImport"),
     fts_rebuild_complete: t("stageImport"),
     import_index_rebuild_complete: t("stageImport"),
@@ -447,6 +488,7 @@ export default function App() {
   const listContinuationRef = useRef<string | null>(null);
   const listHadProvisionalOrderRef = useRef(false);
   const loadConversationPageRef = useRef<(offset: number, append: boolean, staleRetried?: boolean) => AbortController>(() => new AbortController());
+  const loadConversationDetailRef = useRef<(id: string, local?: ConversationSummary, requestedContextKey?: string) => void>(() => undefined);
   const selectedIdRef = useRef<string | null>(null);
   const selectedRef = useRef<ConversationSummary | null>(null);
   const importPollGenerationRef = useRef(0);
@@ -459,6 +501,8 @@ export default function App() {
   const filtersKey = JSON.stringify(filters);
   const searchContextKey = JSON.stringify({ q: debouncedQuery, sort, path, matchMode, filters, listPageSize: settings.listPageSize });
   const searchContextRef = useRef(searchContextKey);
+  const historyRestoreTargetRef = useRef<string | null>(null);
+  const liveHistoryEditRef = useRef(false);
   const appliedShareStateRef = useRef({
     q: urlState.query,
     sort: urlState.sort || "relevance",
@@ -471,24 +515,65 @@ export default function App() {
   const { t } = useMemo(() => createTranslator(settings.language), [settings.language]);
 
   useEffect(() => {
-    syncUrlState({ q: debouncedQuery, sort, path, matchMode, selectedId, filters, layout: settings.messageLayout, showInternal });
+    const state = { q: debouncedQuery, sort, path, matchMode, selectedId, filters, layout: settings.messageLayout, showInternal };
+    if (historyRestoreTargetRef.current !== null) {
+      if (shareableStateKey(state) === historyRestoreTargetRef.current) {
+        historyRestoreTargetRef.current = null;
+      }
+      return;
+    }
+    syncUrlState(state);
   }, [debouncedQuery, sort, path, matchMode, selectedId, filtersKey, settings.messageLayout, showInternal]);
+
+  const commitHistory = useCallback((overrides: Partial<ShareableViewState> = {}) => {
+    const hadLiveEdit = liveHistoryEditRef.current;
+    liveHistoryEditRef.current = false;
+    syncUrlState({
+      q: debouncedQuery,
+      sort,
+      path,
+      matchMode,
+      selectedId,
+      filters,
+      layout: settings.messageLayout,
+      showInternal,
+      ...overrides,
+    }, hadLiveEdit ? "replace" : "push");
+  }, [debouncedQuery, sort, path, matchMode, selectedId, filtersKey, settings.messageLayout, showInternal]);
+
+  const beginLiveHistoryEdit = useCallback(() => {
+    if (liveHistoryEditRef.current) return;
+    try {
+      window.history.pushState(
+        { chatgptArchiveView: true },
+        "",
+        `${window.location.pathname}${window.location.search}`,
+      );
+      liveHistoryEditRef.current = true;
+    } catch {
+      // History support is best-effort; live search remains usable.
+    }
+  }, []);
 
   const setMatchMode = useCallback((value: MatchMode) => {
     setMatchModeState(value);
+    commitHistory({ matchMode: value });
     try {
       localStorage.setItem(MATCH_MODE_KEY, value);
     } catch {
       // Search preference is best-effort local UI state.
     }
-  }, []);
+  }, [commitHistory]);
 
   const updateSettings = useCallback((next: Settings) => {
     const clamped = clampSettings(next);
+    if (clamped.messageLayout !== settings.messageLayout) {
+      commitHistory({ layout: clamped.messageLayout });
+    }
     setSettings(clamped);
     setStorageWarning(!saveSettings(clamped));
     applySettings(clamped);
-  }, []);
+  }, [commitHistory, settings.messageLayout]);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -497,6 +582,72 @@ export default function App() {
   useEffect(() => {
     selectedRef.current = selected;
   }, [selected]);
+
+  useEffect(() => {
+    const restore = () => {
+      const restored = readUrlParams(false);
+      liveHistoryEditRef.current = false;
+      const restoredState: ShareableViewState = {
+        q: restored.query,
+        sort: restored.sort,
+        path: restored.path,
+        matchMode: restored.matchMode,
+        selectedId: restored.selectedId,
+        filters: restored.filters,
+        layout: restored.layout,
+        showInternal: restored.showInternal,
+      };
+      historyRestoreTargetRef.current = shareableStateKey(restoredState);
+      listControllerRef.current?.abort();
+      detailControllerRef.current?.abort();
+      listRequestRef.current += 1;
+      detailRequestRef.current += 1;
+      listContinuationRef.current = null;
+      listHadProvisionalOrderRef.current = false;
+      setLoading(false);
+      setLoadingMore(false);
+      setQuery(restored.query);
+      setDebouncedQuery(restored.query);
+      setSort(restored.sort);
+      setPath(restored.path);
+      setMatchModeState(restored.matchMode);
+      setFilters(restored.filters);
+      selectedIdRef.current = restored.selectedId;
+      setSelectedId(restored.selectedId);
+      setSelected(null);
+      setShowInternal(restored.showInternal);
+      setSettings((current) => {
+        const next = clampSettings({ ...current, messageLayout: restored.layout });
+        applySettings(next);
+        return next;
+      });
+      appliedShareStateRef.current = {
+        q: restored.query,
+        sort: restored.sort,
+        path: restored.path,
+        matchMode: restored.matchMode,
+        selectedId: restored.selectedId,
+        filters: { ...restored.filters },
+      };
+      window.requestAnimationFrame(() => {
+        if (historyRestoreTargetRef.current === shareableStateKey(restoredState)) {
+          historyRestoreTargetRef.current = null;
+        }
+        if (
+          restored.selectedId
+          && selectedIdRef.current === restored.selectedId
+        ) {
+          loadConversationDetailRef.current(
+            restored.selectedId,
+            undefined,
+            searchContextRef.current,
+          );
+        }
+      });
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query), 220);
@@ -564,6 +715,7 @@ export default function App() {
         if (err.name !== "AbortError" && requestId === detailRequestRef.current && selectedIdRef.current === id && searchContextRef.current === requestedContextKey) setError(t("requestFailed"));
       });
   }, [t]);
+  loadConversationDetailRef.current = loadConversationDetail;
 
   const loadConversationPage = useCallback((offset: number, append: boolean, staleRetried = false) => {
     if (!append) listControllerRef.current?.abort();
@@ -728,8 +880,39 @@ export default function App() {
 
   const selectConversation = (id: string) => {
     const local = conversations.find((item) => item.conversation_id === id);
+    commitHistory({ selectedId: id });
     appliedShareStateRef.current = { ...appliedShareStateRef.current, selectedId: id };
     loadConversationDetail(id, local);
+  };
+
+  const commitSearch = () => {
+    setDebouncedQuery(query);
+    commitHistory({ q: query });
+  };
+
+  const changeSort = (value: SortMode) => {
+    setSort(value);
+    commitHistory({ sort: value });
+  };
+
+  const changePath = (value: PathMode) => {
+    setPath(value);
+    commitHistory({ path: value });
+  };
+
+  const changeFilters = (value: SearchFilters) => {
+    beginLiveHistoryEdit();
+    setFilters(value);
+  };
+
+  const commitFilters = (value: SearchFilters) => {
+    setFilters(value);
+    commitHistory({ filters: value });
+  };
+
+  const changeShowInternal = (value: boolean) => {
+    setShowInternal(value);
+    commitHistory({ showInternal: value });
   };
 
   const copyCurrentUrl = async () => {
@@ -829,15 +1012,20 @@ export default function App() {
       <Sidebar
         t={t}
         query={query}
-        setQuery={setQuery}
+        setQuery={(value) => {
+          beginLiveHistoryEdit();
+          setQuery(value);
+        }}
+        onCommitSearch={commitSearch}
         sort={sort}
-        setSort={setSort}
+        setSort={changeSort}
         path={path}
-        setPath={setPath}
+        setPath={changePath}
         matchMode={matchMode}
         setMatchMode={setMatchMode}
         filters={filters}
-        setFilters={setFilters}
+        setFilters={changeFilters}
+        onCommitFilters={commitFilters}
         conversations={conversations}
         selectedId={selectedId}
         onSelect={selectConversation}
@@ -1019,10 +1207,10 @@ export default function App() {
           filters={filters}
           matchMode={matchMode}
           path={path}
-          setPath={setPath}
+          setPath={changePath}
           settings={settings}
           showInternal={showInternal}
-          setShowInternal={setShowInternal}
+          setShowInternal={changeShowInternal}
           t={t}
         />
       </section>

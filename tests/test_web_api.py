@@ -145,6 +145,33 @@ class WebApiTests(unittest.TestCase):
         (build / "index.html").write_text("<!doctype html><html><body><div id=\"root\"></div></body></html>", encoding="utf-8")
         return build
 
+    def test_schema_has_one_current_browser_history_contract(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            client = TestClient(
+                create_app(
+                    base / "archive.db",
+                    static_dir=self.make_build_dir(base),
+                )
+            )
+            self.addCleanup(client.close)
+            response = client.get("/api/schema")
+            self.assertEqual(response.status_code, 200, response.text)
+            ui_state = response.json()["ui_state"]
+            self.assertNotIn("back_forward", ui_state)
+            contract = ui_state["browser_history"]
+            for fact in (
+                "committed searches",
+                "filters",
+                "sort/path",
+                "selected conversation",
+                "layout",
+                "internal-message visibility",
+                "rather than creating an entry per keystroke",
+                "popstate aborts stale list/detail requests",
+            ):
+                self.assertIn(fact, contract)
+
     def test_multipart_spool_is_reported_separately_from_pipeline_copy(self):
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
@@ -7267,7 +7294,7 @@ class WebApiTests(unittest.TestCase):
         raw = json.dumps({"text": "A中文🙂\\u0000"}, ensure_ascii=False)
         conn = sqlite3.connect(db)
         conn.execute(
-            "UPDATE conversation_nodes SET raw_message_json=? "
+            "UPDATE conversation_nodes SET content_text='[non-text content: text]', raw_message_json=? "
             "WHERE conversation_id='web-1' AND node_id='a1'",
             (raw,),
         )
@@ -7679,6 +7706,195 @@ class WebApiTests(unittest.TestCase):
         raw_payload = raw_response.json()
         self.assertEqual(raw_payload["total"], 1)
         self.assertEqual(raw_payload["items"][0]["match_char_offset"], 210_001)
+
+    def test_updated_raw_fallback_exact_hits_have_complete_stale_safe_streams(self):
+        td, client, db = self.make_client()
+        self.addCleanup(td.cleanup)
+        needle = "raw-anchor-needle-🙂"
+
+        def install_raw(prefix: str, suffix: str = " tail") -> None:
+            raw_message = json.dumps(
+                {
+                    "content": {
+                        "content_type": "text",
+                        "parts": [prefix + needle + suffix],
+                    }
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            conn = sqlite3.connect(db)
+            conn.execute(
+                "UPDATE conversation_nodes "
+                "SET content_text='[non-text content: text]', raw_message_json=? "
+                "WHERE conversation_id='web-1' AND node_id='a1'",
+                (raw_message,),
+            )
+            conn.commit()
+            conn.close()
+
+        for prefix in (
+            "a" * 199_999,
+            "b" * 200_000,
+            "c" * 300_000,
+            "d" * 790_000,
+            "中🙂" * 110_000,
+        ):
+            with self.subTest(prefix_chars=len(prefix)):
+                install_raw(prefix)
+                response = client.get(
+                    "/api/search/messages", params={"q": needle, "path": "all"}
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                payload = response.json()
+                self.assertEqual(payload["total"], 1)
+                self.assertTrue(payload["total_exact"])
+                self.assertFalse(payload["diagnostics"]["partial"])
+                hit = payload["items"][0]
+                self.assertEqual(hit["match_char_offset"], len(prefix))
+                self.assertIsInstance(hit["display_anchor_cursor"], str)
+                anchored = client.get(
+                    "/api/by-id/display",
+                    params={
+                        "conversation_id": hit["conversation_id"],
+                        "node_id": hit["node_id"],
+                        "offset": hit["match_char_offset"],
+                        "limit": 2048,
+                        "cursor": hit["display_anchor_cursor"],
+                    },
+                )
+                self.assertEqual(anchored.status_code, 200, anchored.text)
+                anchored_payload = anchored.json()
+                anchor_in_chunk = anchored_payload["anchor_offset_in_chunk"]
+                self.assertIsInstance(anchor_in_chunk, int)
+                self.assertEqual(
+                    anchored_payload["display_text"][
+                        anchor_in_chunk : anchor_in_chunk + len(needle)
+                    ],
+                    needle,
+                )
+                self.assertEqual(anchored_payload["source"], "raw_fallback")
+                self.assertTrue(anchored_payload["total_chars_exact"])
+                self.assertFalse(anchored_payload["resolver_input_truncated"])
+
+                complete = ""
+                stream_offset = 0
+                stream_cursor = hit["display_anchor_cursor"]
+                previous_offset = -1
+                while True:
+                    streamed = client.get(
+                        "/api/by-id/display",
+                        params={
+                            "conversation_id": hit["conversation_id"],
+                            "node_id": hit["node_id"],
+                            "offset": stream_offset,
+                            "limit": 131_072,
+                            "cursor": stream_cursor,
+                        },
+                    )
+                    self.assertEqual(streamed.status_code, 200, streamed.text)
+                    streamed_payload = streamed.json()
+                    self.assertEqual(streamed_payload["offset"], stream_offset)
+                    self.assertTrue(streamed_payload["total_chars_exact"])
+                    self.assertFalse(streamed_payload["resolver_input_truncated"])
+                    complete += streamed_payload["display_text"]
+                    if not streamed_payload["has_more"]:
+                        self.assertIsNone(streamed_payload["next_offset"])
+                        self.assertIsNone(streamed_payload["next_cursor"])
+                        break
+                    self.assertIsInstance(streamed_payload["next_cursor"], str)
+                    self.assertGreater(streamed_payload["next_offset"], previous_offset)
+                    previous_offset = stream_offset
+                    stream_offset = streamed_payload["next_offset"]
+                    stream_cursor = streamed_payload["next_cursor"]
+                self.assertEqual(complete, prefix + needle + " tail")
+                self.assertEqual(streamed_payload["total_chars"], len(complete))
+
+        import chatgpt_export_archiver.search as search_module
+
+        expired_hit = hit
+        with search_module._RAW_DISPLAY_ANCHOR_SESSIONS_LOCK:
+            search_module._RAW_DISPLAY_ANCHOR_SESSIONS.clear()
+        expired = client.get(
+            "/api/by-id/display",
+            params={
+                "conversation_id": expired_hit["conversation_id"],
+                "node_id": expired_hit["node_id"],
+                "offset": expired_hit["match_char_offset"],
+                "limit": 2048,
+                "cursor": expired_hit["display_anchor_cursor"],
+            },
+        )
+        self.assertEqual(expired.status_code, 409)
+        self.assertEqual(expired.json()["detail"], "display_cursor_stale")
+
+        previous_hit = client.get(
+            "/api/search/messages", params={"q": needle, "path": "all"}
+        ).json()["items"][0]
+        install_raw("changed-source " * 20_000)
+        stale = client.get(
+            "/api/by-id/display",
+            params={
+                "conversation_id": previous_hit["conversation_id"],
+                "node_id": previous_hit["node_id"],
+                "offset": previous_hit["match_char_offset"],
+                "limit": 2048,
+                "cursor": previous_hit["display_anchor_cursor"],
+            },
+        )
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(stale.json()["detail"], "display_cursor_stale")
+
+        install_raw("source-kind " * 20_000)
+        source_hit = client.get(
+            "/api/search/messages", params={"q": needle, "path": "all"}
+        ).json()["items"][0]
+        original_revision = source_hit["display_anchor_revision"].removeprefix("row:")
+        conn = sqlite3.connect(db)
+        conn.execute(
+            "UPDATE conversation_nodes SET content_text=?, raw_message_json=NULL "
+            "WHERE conversation_id='web-1' AND node_id='a1'",
+            ("canonical replacement " + needle,),
+        )
+        conn.execute(
+            "UPDATE conversation_nodes SET display_revision=? "
+            "WHERE conversation_id='web-1' AND node_id='a1'",
+            (original_revision,),
+        )
+        conn.commit()
+        stored_revision = conn.execute(
+            "SELECT display_revision FROM conversation_nodes "
+            "WHERE conversation_id='web-1' AND node_id='a1'"
+        ).fetchone()[0]
+        conn.close()
+        self.assertEqual(stored_revision, original_revision)
+        stale_source = client.get(
+            "/api/by-id/display",
+            params={
+                "conversation_id": source_hit["conversation_id"],
+                "node_id": source_hit["node_id"],
+                "offset": source_hit["match_char_offset"],
+                "limit": 2048,
+                "cursor": source_hit["display_anchor_cursor"],
+            },
+        )
+        self.assertEqual(stale_source.status_code, 409)
+        self.assertEqual(stale_source.json()["detail"], "display_cursor_stale")
+
+        conn = sqlite3.connect(db)
+        conn.execute(
+            "UPDATE conversation_nodes "
+            "SET content_text='[non-text content: text]', raw_message_json=? "
+            "WHERE conversation_id='web-1' AND node_id='a1'",
+            (json.dumps({"content": {"content_type": "text", "parts": ["no match"]}}),),
+        )
+        conn.commit()
+        conn.close()
+        missing = client.get(
+            "/api/search/messages", params={"q": needle, "path": "all"}
+        ).json()
+        self.assertEqual(missing["total"], 0)
+        self.assertEqual(missing["items"], [])
 
     def test_round10_exact_verify_limit_preserves_confirmed_results_and_opt_in_completes(self):
         import chatgpt_export_archiver.search as search_module

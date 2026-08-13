@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import resource
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -14,10 +16,13 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 from chatgpt_export_archiver import current_path, exporter, scanner, search, web_api, web_db
-from chatgpt_export_archiver.cli import main
+from chatgpt_export_archiver.cli import ImportPipelineError, main, run_import_pipeline
 from chatgpt_export_archiver.current_path import EffectiveCurrentResourceLimitError
 from chatgpt_export_archiver.db import DatabaseMigrationError, connect, init_db, migrate_database
-from chatgpt_export_archiver.disk_resources import migration_capacity_plan
+from chatgpt_export_archiver.disk_resources import (
+    DiskSpaceInsufficientError,
+    migration_capacity_plan,
+)
 from chatgpt_export_archiver.search import SearchContinuationError
 from chatgpt_export_archiver.web_db import WebIndexBuildError, create_web_indexes, web_index_status
 from chatgpt_export_archiver.web_jobs import ImportJob, ImportJobManager, ImportJobStartError
@@ -28,6 +33,54 @@ from tools import make_release_zip
 
 
 class ResourceSecurityRegressions(unittest.TestCase):
+    def test_real_pipeline_process_sampling_does_not_spawn_cpu_polluters(self):
+        backend = acceptance_real_pipeline._process_sample_backend()
+        if backend == "unavailable":
+            self.skipTest("native process sampling is unavailable on this platform")
+        before = resource.getrusage(resource.RUSAGE_CHILDREN)
+        samples = [
+            acceptance_real_pipeline._process_sample(os.getpid())
+            for _index in range(40)
+        ]
+        after = resource.getrusage(resource.RUSAGE_CHILDREN)
+        child_cpu_delta = (
+            after.ru_utime
+            + after.ru_stime
+            - before.ru_utime
+            - before.ru_stime
+        )
+        self.assertTrue(all(rss > 0 for rss, _cpu in samples))
+        self.assertTrue(all(cpu is not None for _rss, cpu in samples))
+        self.assertLess(child_cpu_delta, 0.01)
+        self.assertIn(backend, {"darwin_libproc", "linux_procfs"})
+
+    def test_raw_display_sessions_evict_before_crossing_resource_budgets(self):
+        import chatgpt_export_archiver.search as search_module
+
+        with search_module._RAW_DISPLAY_ANCHOR_SESSIONS_LOCK:
+            search_module._RAW_DISPLAY_ANCHOR_SESSIONS.clear()
+        self.addCleanup(search_module._RAW_DISPLAY_ANCHOR_SESSIONS.clear)
+        first = {
+            "artifact_id": "first",
+            "retained_bytes": 8,
+            "total_chars": 8,
+        }
+        second = {
+            "artifact_id": "second",
+            "retained_bytes": 8,
+            "total_chars": 8,
+        }
+        with mock.patch.object(
+            search_module, "RAW_DISPLAY_ANCHOR_SESSION_MAX_BYTES", 10
+        ), mock.patch.object(
+            search_module, "RAW_DISPLAY_ANCHOR_SESSION_MAX_CHARS", 10
+        ):
+            self.assertTrue(search_module._store_raw_display_anchor("first", first))
+            self.assertTrue(search_module._store_raw_display_anchor("second", second))
+        with search_module._RAW_DISPLAY_ANCHOR_SESSIONS_LOCK:
+            self.assertNotIn("first", search_module._RAW_DISPLAY_ANCHOR_SESSIONS)
+            self.assertIn("second", search_module._RAW_DISPLAY_ANCHOR_SESSIONS)
+
     def test_unrelated_database_shard_collision_uses_independent_ranges(self):
         with tempfile.TemporaryDirectory() as td, mock.patch.object(
             web_db, "_process_lock_name", return_value="writer-shard-00.lock"
@@ -467,6 +520,12 @@ class ResourceSecurityRegressions(unittest.TestCase):
         self.assertTrue(timeout["hard_timeout"])
         self.assertTrue(timeout["partial"])
         self.assertIsNotNone(timeout["worker_return_code"])
+        self.assertTrue(timeout["terminate_attempted"])
+        self.assertTrue(timeout["reaped"])
+        self.assertFalse(timeout["reap_incomplete"])
+        self.assertTrue(timeout["process_tree_cleanup_attempted"])
+        self.assertTrue(timeout["process_tree_cleanup_complete"])
+        self.assertFalse(timeout["pipe_drain_incomplete"])
 
         resource_timeout = benchmark_resources._run_worker_bounded(
             [sys.executable, "-c", "import time; time.sleep(5)"],
@@ -478,6 +537,519 @@ class ResourceSecurityRegressions(unittest.TestCase):
         self.assertTrue(resource_timeout["terminated"] or resource_timeout["killed"])
         self.assertTrue(resource_timeout["reaped"])
         self.assertIsNotNone(resource_timeout["worker_pid"])
+        self.assertTrue(resource_timeout["process_tree_cleanup_attempted"])
+        self.assertTrue(resource_timeout["process_tree_cleanup_complete"])
+
+        class ResistantProcess:
+            pid = 12345
+            returncode = None
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                return None
+
+            def kill(self):
+                return None
+
+            def communicate(self, timeout):
+                raise subprocess.TimeoutExpired("synthetic", timeout)
+
+            def wait(self, timeout):
+                raise subprocess.TimeoutExpired("synthetic", timeout)
+
+        for helper in (
+            acceptance_scale._terminate_kill_reap,
+            benchmark_resources._terminate_kill_reap,
+        ):
+            with self.subTest(helper=helper.__module__):
+                _stdout, _stderr, lifecycle = helper(
+                    ResistantProcess(), timeout_seconds=0.05
+                )
+                self.assertTrue(lifecycle["terminate_attempted"])
+                self.assertTrue(lifecycle["kill_attempted"])
+                self.assertFalse(lifecycle["reaped"])
+                self.assertTrue(lifecycle["reap_incomplete"])
+                self.assertFalse(lifecycle["process_tree_cleanup_complete"])
+                self.assertTrue(lifecycle["pipe_drain_incomplete"])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process-group contract")
+    def test_watchdogs_kill_owned_grandchild_and_finish_pipe_drain(self):
+        child_script = (
+            "import pathlib,signal,subprocess,sys,time;"
+            "signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+            "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']);"
+            "pathlib.Path(sys.argv[1]).write_text(str(child.pid),encoding='ascii');"
+            "time.sleep(30)"
+        )
+        for helper in (
+            acceptance_scale._terminate_kill_reap,
+            benchmark_resources._terminate_kill_reap,
+        ):
+            with self.subTest(helper=helper.__module__), tempfile.TemporaryDirectory() as td:
+                marker = Path(td) / "grandchild.pid"
+                process = subprocess.Popen(
+                    [sys.executable, "-c", child_script, str(marker)],
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    start_new_session=True,
+                )
+                deadline = time.monotonic() + 2
+                while not marker.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(marker.exists())
+                grandchild_pid = int(marker.read_text(encoding="ascii"))
+                try:
+                    _stdout, _stderr, lifecycle = helper(
+                        process,
+                        timeout_seconds=1.0,
+                        owned_process_group=True,
+                    )
+                    self.assertTrue(lifecycle["process_tree_cleanup_attempted"])
+                    self.assertTrue(lifecycle["direct_child_reaped"])
+                    self.assertFalse(lifecycle["owned_descendants_remaining"])
+                    self.assertTrue(lifecycle["process_tree_cleanup_complete"])
+                    self.assertFalse(lifecycle["pipe_drain_incomplete"])
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(grandchild_pid, 0)
+                finally:
+                    try:
+                        os.killpg(process.pid, 9)
+                    except ProcessLookupError:
+                        pass
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process-group contract")
+    def test_real_pipeline_shutdown_proves_owned_grandchild_cleanup(self):
+        child_script = (
+            "import pathlib,signal,subprocess,sys,time;"
+            "signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+            "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']);"
+            "pathlib.Path(sys.argv[1]).write_text(str(child.pid),encoding='ascii');"
+            "time.sleep(30)"
+        )
+        with tempfile.TemporaryDirectory() as td:
+            marker = Path(td) / "grandchild.pid"
+            process = subprocess.Popen(
+                [sys.executable, "-c", child_script, str(marker)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            deadline = time.monotonic() + 2
+            while not marker.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(marker.exists())
+            grandchild_pid = int(marker.read_text(encoding="ascii"))
+            try:
+                lifecycle = acceptance_real_pipeline._stop_process_bounded(
+                    process, time.monotonic() + 1.0
+                )
+                self.assertTrue(lifecycle["process_tree_cleanup_attempted"])
+                self.assertTrue(lifecycle["process_tree_cleanup_supported"])
+                self.assertTrue(lifecycle["direct_child_reaped"])
+                self.assertFalse(lifecycle["owned_descendants_remaining"])
+                self.assertTrue(lifecycle["process_tree_cleanup_complete"])
+                self.assertFalse(lifecycle["pipe_drain_incomplete"])
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(grandchild_pid, 0)
+            finally:
+                try:
+                    os.killpg(process.pid, 9)
+                except ProcessLookupError:
+                    pass
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process-group contract")
+    def test_watchdog_signal_permission_failure_is_structured_not_raised(self):
+        class EventuallyReapedProcess:
+            pid = 12345
+            returncode = None
+            stdout = None
+            stderr = None
+
+            def __init__(self):
+                self.communications = 0
+
+            def poll(self):
+                return self.returncode
+
+            def communicate(self, timeout):
+                self.communications += 1
+                if self.communications == 1:
+                    raise subprocess.TimeoutExpired("synthetic", timeout)
+                self.returncode = 0
+                return "", ""
+
+        def signal_result(_pid, sig):
+            if sig == 9:
+                raise PermissionError("synthetic")
+            if sig == 0:
+                raise ProcessLookupError
+
+        process = EventuallyReapedProcess()
+        with mock.patch.object(
+            acceptance_real_pipeline.os, "killpg", side_effect=signal_result
+        ):
+            _stdout, _stderr, lifecycle = (
+                acceptance_real_pipeline.terminate_kill_reap(
+                    process,
+                    timeout_seconds=0.2,
+                    owned_process_group=True,
+                )
+            )
+        self.assertTrue(lifecycle["direct_child_reaped"])
+        self.assertFalse(lifecycle["owned_descendants_remaining"])
+        self.assertTrue(lifecycle["process_tree_cleanup_complete"])
+        self.assertTrue(lifecycle["signal_cleanup_degraded"])
+        self.assertEqual(lifecycle["signal_error_types"], ["PermissionError"])
+
+    def test_scale_validation_claims_require_observed_parser_stage(self):
+        layers = acceptance_scale._validation_layers_from_observed_stages(
+            [],
+            retained_canonical_same_scale=False,
+            indexed_source_same_scale=False,
+        )
+        self.assertFalse(layers["json_parser"])
+        observed = acceptance_scale._validation_layers_from_observed_stages(
+            [
+                "source_selection_completed",
+                "json_parser_entered",
+                "json_parser_completed",
+            ],
+            retained_canonical_same_scale=False,
+            indexed_source_same_scale=False,
+        )
+        self.assertTrue(observed["json_parser"])
+
+        full = acceptance_scale._validation_status(
+            outcome="import_disk_space_insufficient",
+            verify_ok=None,
+            index_complete=False,
+            capacity_probe=False,
+        )
+        self.assertTrue(full["capacity_blocked"])
+        self.assertFalse(full["validation_completed"])
+        self.assertTrue(full["worker_failed"])
+        probe = acceptance_scale._validation_status(
+            outcome="import_disk_space_insufficient",
+            verify_ok=None,
+            index_complete=False,
+            capacity_probe=True,
+        )
+        self.assertFalse(probe["worker_failed"])
+
+    def test_import_proof_events_match_production_boundaries(self):
+        proof_names = {
+            "source_selection_completed",
+            "source_preflight_completed",
+            "disk_admission_completed",
+            "json_parser_entered",
+            "json_parser_completed",
+            "canonical_import_entered",
+            "canonical_import_committed",
+        }
+
+        def run_payload(payload, *, raw=False):
+            td = tempfile.TemporaryDirectory()
+            self.addCleanup(td.cleanup)
+            base = Path(td.name)
+            source = base / "synthetic.zip"
+            database = base / "archive.db"
+            data = payload if raw else json.dumps(payload).encode("utf-8")
+            with zipfile.ZipFile(source, "w") as bundle:
+                bundle.writestr("conversations.json", data)
+            stages: list[str] = []
+            outcome = "completed"
+            try:
+                run_import_pipeline(
+                    database,
+                    str(source),
+                    cwd=base,
+                    no_input_sha256=True,
+                    progress_callback=lambda stage, _summary: stages.append(stage),
+                )
+            except ImportPipelineError as exc:
+                outcome = exc.code
+            for stage in proof_names:
+                self.assertLessEqual(stages.count(stage), 1, stage)
+            return outcome, stages
+
+        valid = conversation("proof-valid")
+        cases = (
+            (
+                "top-level-object",
+                {"id": "not-an-array"},
+                False,
+                "conversation_json_top_level_not_list",
+                {"json_parser_entered"},
+                {"json_parser_completed", "canonical_import_entered", "canonical_import_committed"},
+            ),
+            (
+                "syntax-before-first",
+                b"[{",
+                True,
+                "invalid_conversation_json",
+                {"json_parser_entered"},
+                {"json_parser_completed", "canonical_import_entered", "canonical_import_committed"},
+            ),
+            (
+                "only-invalid",
+                [None, {}],
+                False,
+                "completed",
+                {"json_parser_entered", "json_parser_completed"},
+                {"canonical_import_entered", "canonical_import_committed"},
+            ),
+            (
+                "invalid-then-valid",
+                [None, valid],
+                False,
+                "completed",
+                {"json_parser_completed", "canonical_import_entered", "canonical_import_committed"},
+                set(),
+            ),
+            (
+                "normal-valid",
+                [valid],
+                False,
+                "completed",
+                {"json_parser_completed", "canonical_import_entered", "canonical_import_committed"},
+                set(),
+            ),
+        )
+        for name, payload, raw, expected_outcome, present, absent in cases:
+            with self.subTest(name=name):
+                outcome, stages = run_payload(payload, raw=raw)
+                self.assertEqual(outcome, expected_outcome)
+                self.assertTrue(
+                    {"source_selection_completed", "source_preflight_completed", "disk_admission_completed"}.issubset(stages)
+                )
+                self.assertTrue(present.issubset(stages))
+                self.assertTrue(absent.isdisjoint(stages))
+                evidence = acceptance_scale._validation_evidence(
+                    stages,
+                    physical_zip_created=True,
+                )
+                for stage in present:
+                    if stage in evidence:
+                        self.assertTrue(evidence[stage])
+                for stage in absent:
+                    self.assertFalse(evidence[stage])
+
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        base = Path(td.name)
+        source = base / "capacity.zip"
+        write_zip(source, {"conversations.json": [valid]})
+        stages: list[str] = []
+        failure = DiskSpaceInsufficientError(
+            "import_disk_space_insufficient",
+            required_bytes=2,
+            free_bytes=1,
+        )
+        with mock.patch(
+            "chatgpt_export_archiver.cli.require_free_space",
+            side_effect=failure,
+        ):
+            with self.assertRaisesRegex(
+                ImportPipelineError,
+                "import_disk_space_insufficient",
+            ):
+                run_import_pipeline(
+                    base / "capacity.db",
+                    str(source),
+                    cwd=base,
+                    no_input_sha256=True,
+                    progress_callback=lambda stage, _summary: stages.append(stage),
+                )
+        capacity_evidence = acceptance_scale._validation_evidence(
+            stages,
+            physical_zip_created=True,
+        )
+        self.assertTrue(capacity_evidence["source_selection_completed"])
+        self.assertTrue(capacity_evidence["source_preflight_completed"])
+        self.assertFalse(capacity_evidence["disk_admission_completed"])
+        self.assertFalse(capacity_evidence["json_parser_entered"])
+
+    def test_scale_machine_evidence_reports_verify_and_web_index_failures(self):
+        with mock.patch.object(
+            acceptance_scale,
+            "verify_database",
+            side_effect=RuntimeError("synthetic"),
+        ):
+            verify_failure = acceptance_scale._retained_indexed_worker(
+                1,
+                indexed=True,
+                trace_allocations=False,
+                capacity_probe=False,
+            )
+        self.assertEqual(verify_failure["outcome"], "verify_failed")
+        self.assertTrue(verify_failure["canonical_import_committed"])
+        self.assertFalse(verify_failure["verify_completed"])
+        self.assertFalse(verify_failure["web_index_completed"])
+        self.assertEqual(verify_failure["validation_failure"]["stage"], "verify")
+        self.assertTrue(verify_failure["worker_failed"])
+
+        with mock.patch.object(
+            acceptance_scale,
+            "create_web_indexes",
+            side_effect=RuntimeError("synthetic"),
+        ):
+            index_failure = acceptance_scale._retained_indexed_worker(
+                1,
+                indexed=True,
+                trace_allocations=False,
+                capacity_probe=False,
+            )
+        self.assertEqual(index_failure["outcome"], "web_index_failed")
+        self.assertTrue(index_failure["canonical_import_committed"])
+        self.assertTrue(index_failure["verify_completed"])
+        self.assertFalse(index_failure["web_index_completed"])
+        self.assertEqual(index_failure["validation_failure"]["stage"], "web_index")
+        self.assertTrue(index_failure["worker_failed"])
+
+    def test_sampler_coverage_requires_every_entered_stage_and_join(self):
+        stages = [
+            "pre_upload",
+            "upload",
+            "import",
+            "verify",
+            "stats",
+            "web_index",
+            "server_shutdown",
+            "required_cleanup",
+        ]
+        for missing in ("import", "verify", "stats", "web_index"):
+            with self.subTest(missing=missing):
+                observed = [stage for stage in stages if stage != missing]
+                unsampled, complete = acceptance_real_pipeline._sampling_coverage(
+                    stages,
+                    observed,
+                    thread_alive=False,
+                )
+                self.assertEqual(unsampled, [missing])
+                self.assertFalse(complete)
+        unsampled, complete = acceptance_real_pipeline._sampling_coverage(
+            stages,
+            stages,
+            thread_alive=True,
+        )
+        self.assertEqual(unsampled, [])
+        self.assertFalse(complete)
+        unsampled, complete = acceptance_real_pipeline._sampling_coverage(
+            stages,
+            stages,
+            thread_alive=False,
+        )
+        self.assertEqual(unsampled, [])
+        self.assertTrue(complete)
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            process = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(10)"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                sampler = acceptance_real_pipeline._ResourceSampler(
+                    base,
+                    base / "archive.db",
+                    process,
+                    interval_seconds=60,
+                    heartbeat_seconds=60,
+                    started=time.monotonic(),
+                )
+                sampler.start()
+                for stage in stages[1:]:
+                    sampler.update(stage=stage)
+                sampled = sampler.stop(hard_deadline=time.monotonic() + 1)
+                self.assertTrue(sampled["coverage_complete"])
+                self.assertEqual(sampled["unsampled_entered_stages"], [])
+                self.assertTrue(set(stages).issubset(sampled["observed_stages"]))
+                self.assertGreaterEqual(
+                    sampled["sampling_overhead_wall_seconds"],
+                    0,
+                )
+
+                join_failure = acceptance_real_pipeline._ResourceSampler(
+                    base,
+                    base / "archive.db",
+                    process,
+                    interval_seconds=60,
+                    heartbeat_seconds=60,
+                    started=time.monotonic(),
+                )
+                join_failure.start()
+                with mock.patch.object(
+                    join_failure._thread,
+                    "join",
+                    return_value=None,
+                ), mock.patch.object(
+                    join_failure._thread,
+                    "is_alive",
+                    return_value=True,
+                ):
+                    failed_join = join_failure.stop(
+                        hard_deadline=time.monotonic() + 1
+                    )
+                join_failure._thread.join(timeout=1)
+                self.assertFalse(failed_join["coverage_complete"])
+                self.assertTrue(failed_join["sampler_cleanup_failed"])
+            finally:
+                process.terminate()
+                process.wait(timeout=2)
+
+    def test_resource_stress_small_capacity_fixture_cannot_claim_parser(self):
+        failure = acceptance_scale.ImportPipelineError(
+            "import_disk_space_insufficient",
+            stage="input_preflight",
+            detail={"required_bytes": 2_000_000, "free_bytes": 1_000_000},
+        )
+        with mock.patch.object(
+            acceptance_scale,
+            "run_import_pipeline",
+            side_effect=failure,
+        ):
+            full = acceptance_scale._resource_stress_worker(
+                1,
+                trace_allocations=False,
+                capacity_probe=False,
+                _target_bytes=1024 * 1024,
+            )
+        self.assertEqual(full["observed_stages"], [])
+        self.assertTrue(full["physical_zip_created"])
+        self.assertFalse(full["selected_logical_json_identified"])
+        self.assertFalse(full["zip_preflight_completed"])
+        self.assertFalse(full["json_parser_entered"])
+        self.assertFalse(full["json_parser_completed"])
+        self.assertFalse(full["canonical_import_entered"])
+        self.assertFalse(full["canonical_import_committed"])
+        self.assertFalse(full["verify_completed"])
+        self.assertFalse(full["web_index_completed"])
+        self.assertFalse(full["validation_layers"]["json_parser"])
+        self.assertTrue(full["capacity_blocked"])
+        self.assertFalse(full["validation_completed"])
+        self.assertTrue(full["worker_failed"])
+
+        with mock.patch.object(
+            acceptance_scale,
+            "run_import_pipeline",
+            side_effect=failure,
+        ):
+            probe = acceptance_scale._resource_stress_worker(
+                1,
+                trace_allocations=False,
+                capacity_probe=True,
+                _target_bytes=1024 * 1024,
+            )
+        self.assertFalse(probe["validation_layers"]["json_parser"])
+        self.assertTrue(probe["physical_zip_created"])
+        self.assertFalse(probe["selected_logical_json_identified"])
+        self.assertFalse(probe["json_parser_entered"])
+        self.assertFalse(probe["validation_completed"])
+        self.assertFalse(probe["worker_failed"])
 
     def test_scale_huge_parent_defaults_to_untraced_performance(self):
         sample = {

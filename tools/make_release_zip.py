@@ -53,6 +53,7 @@ AUTHORITATIVE_REQUIRED_FILES = (
     "tools/benchmark_resources.py",
     "tools/acceptance_real_pipeline.py",
     "tools/acceptance_scale.py",
+    "tools/process_watchdog.py",
     "tools/check_delivery_clean.py",
     "tools/clean_generated_artifacts.py",
     "tools/make_release_zip.py",

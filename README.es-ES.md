@@ -172,12 +172,6 @@ Reconstruye los índices opcionales de búsqueda Web:
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 ```
 
-Arranca la Web UI:
-
-```bash
-python chatgpt_archive.py web --db archive/chatgpt_archive.db --port 8787
-```
-
 ## Modos de importación
 
 El comando recomendado para archivos grandes es:
@@ -200,11 +194,7 @@ python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_Z
 
 ## Flujo de la Web UI
 
-Inicia la Web UI local con el comando siguiente. Puede abrir una base de datos existente o arrancar sin ella e importar un ZIP desde el navegador. El lector ofrece diseños chat y clásico paginados, búsqueda, controles de mensajes internos, copia y descarga.
-
-```bash
-python chatgpt_archive.py web --port 8787
-```
+Usa el comando de inicio Web de la sección de instalación. La página puede abrir una base de datos existente o arrancar sin ella e importar un ZIP, con diseños chat y clásico paginados, búsqueda, controles de mensajes internos, copia y descarga. Las coincidencias muy largas recuperadas de datos de exportación antiguos también se pueden abrir y copiar completas; si caduca esa sesión temporal de búsqueda, vuelve a buscar. Atrás y Adelante restauran búsquedas enviadas, filtros, rutas, conversaciones seleccionadas y diseño sin añadir una entrada por cada tecla.
 
 ## Límites de seguridad de subida Web
 

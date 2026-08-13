@@ -14,9 +14,7 @@ import http.client
 import json
 import os
 import platform
-import resource
 import shutil
-import signal
 import socket
 import sqlite3
 import statistics
@@ -40,6 +38,7 @@ from chatgpt_export_archiver.scanner import (  # noqa: E402
     resolve_input,
     select_conversation_sources,
 )
+from tools.process_watchdog import terminate_kill_reap  # noqa: E402
 
 READ_CHUNK = 1024 * 1024
 TERMINAL_JOB_STATES = {"succeeded", "failed", "postcheck_failed"}
@@ -275,18 +274,86 @@ def _apply_connection_deadline(
     return remaining
 
 
-def _process_sample(pid: int) -> tuple[int, float]:
+def _linux_process_sample(pid: int) -> tuple[int, float] | None:
     try:
-        completed = subprocess.run(
-            ["ps", "-o", "rss=", "-o", "%cpu=", "-p", str(pid)],
-            text=True,
-            capture_output=True,
-            check=True,
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = raw[raw.rfind(")") + 2 :].split()
+        clock_ticks = int(os.sysconf("SC_CLK_TCK"))
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+        cpu_seconds = (int(fields[11]) + int(fields[12])) / clock_ticks
+        rss_bytes = max(0, int(fields[21])) * page_size
+        return rss_bytes, cpu_seconds
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _darwin_process_sample(pid: int) -> tuple[int, float] | None:
+    try:
+        import ctypes
+
+        class ProcTaskInfo(ctypes.Structure):
+            _fields_ = [
+                ("virtual_size", ctypes.c_uint64),
+                ("resident_size", ctypes.c_uint64),
+                ("total_user", ctypes.c_uint64),
+                ("total_system", ctypes.c_uint64),
+                ("threads_user", ctypes.c_uint64),
+                ("threads_system", ctypes.c_uint64),
+                ("policy", ctypes.c_int32),
+                ("faults", ctypes.c_int32),
+                ("pageins", ctypes.c_int32),
+                ("cow_faults", ctypes.c_int32),
+                ("messages_sent", ctypes.c_int32),
+                ("messages_received", ctypes.c_int32),
+                ("syscalls_mach", ctypes.c_int32),
+                ("syscalls_unix", ctypes.c_int32),
+                ("csw", ctypes.c_int32),
+                ("threadnum", ctypes.c_int32),
+                ("numrunning", ctypes.c_int32),
+                ("priority", ctypes.c_int32),
+            ]
+
+        info = ProcTaskInfo()
+        libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        proc_pidinfo = libproc.proc_pidinfo
+        proc_pidinfo.argtypes = [
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint64,
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ]
+        proc_pidinfo.restype = ctypes.c_int
+        returned = proc_pidinfo(
+            int(pid), 4, 0, ctypes.byref(info), ctypes.sizeof(info)
         )
-        fields = completed.stdout.strip().split()
-        return int(float(fields[0])) * 1024, float(fields[1])
-    except (OSError, ValueError, subprocess.SubprocessError, IndexError):
-        return 0, 0.0
+        if returned != ctypes.sizeof(info):
+            return None
+        cpu_seconds = (info.total_user + info.total_system) / 1_000_000_000
+        return int(info.resident_size), float(cpu_seconds)
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _process_sample(pid: int) -> tuple[int, float | None]:
+    """Read one process without spawning helpers that contaminate CPU totals."""
+
+    sample = (
+        _darwin_process_sample(pid)
+        if sys.platform == "darwin"
+        else _linux_process_sample(pid)
+        if sys.platform.startswith("linux")
+        else None
+    )
+    return sample if sample is not None else (0, None)
+
+
+def _process_sample_backend() -> str:
+    if sys.platform == "darwin":
+        return "darwin_libproc"
+    if sys.platform.startswith("linux"):
+        return "linux_procfs"
+    return "unavailable"
 
 
 def _tree_metrics(root: Path, database: Path) -> dict[str, int | None]:
@@ -333,6 +400,16 @@ def _tree_metrics(root: Path, database: Path) -> dict[str, int | None]:
     }
 
 
+def _sampling_coverage(
+    entered_stages: list[str],
+    observed_stages: list[str],
+    *,
+    thread_alive: bool,
+) -> tuple[list[str], bool]:
+    unsampled = sorted(set(entered_stages).difference(observed_stages))
+    return unsampled, not unsampled and not thread_alive
+
+
 class _ResourceSampler:
     """Low-overhead sampled filesystem/process diagnostics for one run."""
 
@@ -360,6 +437,10 @@ class _ResourceSampler:
         self.sampled_stage_counts: dict[str, int] = {}
         self.peak_rss_bytes = 0
         self.peak_cpu_percent_sample = 0.0
+        self.process_cpu_first: float | None = None
+        self.process_cpu_latest: float | None = None
+        self.process_sample_at: float | None = None
+        self.sampling_overhead_wall_seconds = 0.0
         self.samples = 0
         self._next_heartbeat = time.monotonic() + self.heartbeat_seconds
         self._stop = threading.Event()
@@ -375,28 +456,56 @@ class _ResourceSampler:
         self._thread.start()
 
     def update(self, *, stage: str | None = None, job_status: str | None = None) -> bool:
+        stage_changed = False
         with self._lock:
             changed = False
             if stage is not None:
-                changed = changed or stage != self.stage
+                stage_changed = stage != self.stage
+                changed = changed or stage_changed
                 self.stage = stage
                 self.entered_stages.add(stage)
             if job_status is not None:
                 changed = changed or job_status != self.job_status
                 self.job_status = job_status
-            return changed
+        if stage_changed:
+            # Stage transitions are few and important. Sampling them
+            # synchronously prevents a long interval from hiding short stages.
+            self.sample_now()
+        return changed
 
     def sample_now(self) -> None:
+        sample_started = time.perf_counter()
         current = _tree_metrics(self.root, self.database)
-        rss, cpu_percent = _process_sample(self.process.pid)
+        rss, process_cpu = _process_sample(self.process.pid)
+        sampled_at = time.monotonic()
         with self._lock:
             for key, value in current.items():
                 if value is None:
                     continue
                 self.peaks[key] = max(self.peaks.get(key, 0), int(value))
             self.peak_rss_bytes = max(self.peak_rss_bytes, rss)
+            cpu_percent = 0.0
+            if process_cpu is not None:
+                if self.process_cpu_first is None:
+                    self.process_cpu_first = process_cpu
+                if (
+                    self.process_cpu_latest is not None
+                    and self.process_sample_at is not None
+                    and sampled_at > self.process_sample_at
+                ):
+                    cpu_percent = max(
+                        0.0,
+                        (process_cpu - self.process_cpu_latest)
+                        / (sampled_at - self.process_sample_at)
+                        * 100.0,
+                    )
+                self.process_cpu_latest = process_cpu
+                self.process_sample_at = sampled_at
             self.peak_cpu_percent_sample = max(
                 self.peak_cpu_percent_sample, cpu_percent
+            )
+            self.sampling_overhead_wall_seconds += max(
+                0.0, time.perf_counter() - sample_started
             )
             self.samples += 1
             stage = self.stage
@@ -445,17 +554,37 @@ class _ResourceSampler:
             entered_stages = sorted(self.entered_stages)
             observed_stages = sorted(self.observed_stages)
             sampled_stage_counts = dict(sorted(self.sampled_stage_counts.items()))
-        required_stages = {"pre_upload", "upload", "server_shutdown", "required_cleanup"}
+            process_cpu_seconds = (
+                max(0.0, self.process_cpu_latest - self.process_cpu_first)
+                if self.process_cpu_latest is not None
+                and self.process_cpu_first is not None
+                else None
+            )
+            sampling_overhead = self.sampling_overhead_wall_seconds
+        unsampled_entered_stages, coverage_complete = _sampling_coverage(
+            entered_stages,
+            observed_stages,
+            thread_alive=thread_alive,
+        )
+        elapsed = max(0.0, time.monotonic() - self.started)
         return {
             "sampling_interval_seconds": self.interval_seconds,
             "sample_count": samples,
+            "process_sample_backend": _process_sample_backend(),
+            "sampling_overhead_wall_seconds": sampling_overhead,
+            "sampling_overhead_ratio": (
+                sampling_overhead / elapsed if elapsed > 0 else None
+            ),
+            "process_cpu_seconds": process_cpu_seconds,
+            "process_cpu_semantics": "target_server_process_only",
             "sampled_peaks": peaks,
             "peak_rss_bytes": peak_rss,
             "peak_cpu_percent_sample": peak_cpu,
             "entered_stages": entered_stages,
             "observed_stages": observed_stages,
             "sampled_stage_counts": sampled_stage_counts,
-            "coverage_complete": required_stages.issubset(observed_stages) and not thread_alive,
+            "unsampled_entered_stages": unsampled_entered_stages,
+            "coverage_complete": coverage_complete,
             "sampler_thread_alive": thread_alive,
             "sampler_cleanup_failed": thread_alive,
             "web_index_live_bytes": None,
@@ -562,32 +691,23 @@ def _bounded_smoke(port: int, *, hard_deadline: float) -> dict[str, Any]:
 def _stop_process_bounded(
     process: subprocess.Popen[bytes], hard_deadline: float
 ) -> dict[str, Any]:
-    result: dict[str, Any] = {
+    timeout_seconds = max(0.05, min(5.0, hard_deadline - time.monotonic()))
+    _stdout, _stderr, lifecycle = terminate_kill_reap(
+        process,
+        timeout_seconds=timeout_seconds,
+        owned_process_group=True,
+    )
+    result: dict[str, Any] = dict(lifecycle)
+    result.update({
         "attempted": True,
-        "complete": process.poll() is not None,
-        "terminated": False,
-        "killed": False,
-        "reaped": process.poll() is not None,
-    }
-    if process.poll() is None:
-        process.send_signal(signal.SIGTERM)
-        result["terminated"] = True
-        try:
-            process.wait(
-                timeout=max(0.01, min(5.0, hard_deadline - time.monotonic()))
-            )
-        except subprocess.TimeoutExpired:
-            process.kill()
-            result["killed"] = True
-            try:
-                process.wait(
-                    timeout=max(0.01, min(1.0, hard_deadline - time.monotonic()))
-                )
-            except subprocess.TimeoutExpired:
-                pass
-    result["complete"] = process.poll() is not None
-    result["reaped"] = result["complete"]
-    result["return_code"] = process.poll()
+        "complete": bool(lifecycle["process_tree_cleanup_complete"]),
+        "terminated": bool(lifecycle["terminate_attempted"]),
+        "killed": bool(lifecycle["kill_attempted"]),
+        "hard_timeout": bool(
+            not lifecycle["process_tree_cleanup_complete"]
+            and time.monotonic() >= hard_deadline
+        ),
+    })
     return result
 
 
@@ -605,7 +725,11 @@ def _remove_tree_bounded(
         "complete": False,
         "terminated": False,
         "killed": False,
+        "terminate_attempted": False,
+        "kill_attempted": False,
         "reaped": False,
+        "reap_incomplete": False,
+        "hard_timeout": False,
         "remaining_path": path.exists(),
     }
     if force_failure:
@@ -627,27 +751,45 @@ def _remove_tree_bounded(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env=_worker_environment_for_cleanup(),
+        start_new_session=os.name == "posix",
     )
     result["pid"] = process.pid
+    result["child_pid"] = process.pid
     try:
-        process.wait(timeout=max(0.01, hard_deadline - time.monotonic()))
+        wait_budget = max(0.01, hard_deadline - time.monotonic())
+        process.wait(timeout=max(0.01, wait_budget * 0.75))
     except subprocess.TimeoutExpired:
-        process.terminate()
-        result["terminated"] = True
-        try:
-            process.wait(timeout=max(0.01, min(0.25, hard_deadline - time.monotonic())))
-        except subprocess.TimeoutExpired:
-            process.kill()
-            result["killed"] = True
-            try:
-                process.wait(timeout=0.05)
-            except subprocess.TimeoutExpired:
-                pass
+        _stdout, _stderr, lifecycle = terminate_kill_reap(
+            process,
+            timeout_seconds=max(
+                0.05, min(0.5, hard_deadline - time.monotonic())
+            ),
+            owned_process_group=True,
+        )
+        result.update(lifecycle)
+        result["terminated"] = bool(lifecycle["terminate_attempted"])
+        result["killed"] = bool(lifecycle["kill_attempted"])
+    if "process_tree_cleanup_complete" not in result:
+        _stdout, _stderr, lifecycle = terminate_kill_reap(
+            process,
+            timeout_seconds=max(
+                0.05, min(0.25, hard_deadline - time.monotonic())
+            ),
+            owned_process_group=True,
+        )
+        result.update(lifecycle)
     result["return_code"] = process.poll()
     result["reaped"] = process.poll() is not None
+    result["reap_incomplete"] = not result["reaped"]
+    result["hard_timeout"] = bool(
+        result["reap_incomplete"] and time.monotonic() >= hard_deadline
+    )
     result["remaining_path"] = path.exists()
     result["complete"] = bool(
-        result["reaped"] and process.returncode == 0 and not result["remaining_path"]
+        result["reaped"]
+        and process.returncode == 0
+        and not result["remaining_path"]
+        and result.get("process_tree_cleanup_complete", True)
     )
     if process.poll() not in {None, 0} and "error_type" not in result:
         result["error_type"] = "CleanupSubprocessError"
@@ -687,7 +829,6 @@ def _run_once(
     sampler: _ResourceSampler | None = None
     port: int | None = None
     job_id: str | None = None
-    before_children = resource.getrusage(resource.RUSAGE_CHILDREN)
     metrics: dict[str, Any] = {
         "run": run_number,
         "success": False,
@@ -797,6 +938,7 @@ def _run_once(
                 env=env,
                 stdout=log_stream,
                 stderr=subprocess.STDOUT,
+                start_new_session=os.name == "posix",
             )
         finally:
             log_stream.close()
@@ -919,6 +1061,7 @@ def _run_once(
         metrics["server_shutdown"]["attempted"] = process is not None
         if sampler is not None:
             sampler.update(stage="server_shutdown")
+            sampler.sample_now()
         if process is not None:
             metrics["server_shutdown"].update(
                 _stop_process_bounded(process, hard_deadline)
@@ -928,18 +1071,15 @@ def _run_once(
         )
         if sampler is not None:
             sampler.sample_now()
-        after_children = resource.getrusage(resource.RUSAGE_CHILDREN)
-        metrics["child_cpu_seconds"] = max(
-            0.0,
-            (after_children.ru_utime + after_children.ru_stime)
-            - (before_children.ru_utime + before_children.ru_stime),
-        )
         cleanup_started = time.perf_counter()
         if sampler is not None:
             sampler.update(stage="required_cleanup")
             sampler.sample_now()
             resource_metrics = sampler.stop(hard_deadline=hard_deadline)
             metrics["resource_sampler"] = resource_metrics
+            metrics["child_cpu_seconds"] = resource_metrics[
+                "process_cpu_seconds"
+            ]
             metrics["peak_rss_bytes"] = resource_metrics["peak_rss_bytes"]
             metrics["peak_cpu_percent_sample"] = resource_metrics[
                 "peak_cpu_percent_sample"
@@ -1096,12 +1236,18 @@ def main() -> int:
         default=0.0,
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--self-test-outer-cleanup-failure",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
     synthetic_root: Path | None = None
     if (
         args.self_test
         or args.self_test_cleanup_failure
         or args.self_test_cleanup_delay_seconds > 0
+        or args.self_test_outer_cleanup_failure
     ):
         synthetic_root = Path(tempfile.mkdtemp(prefix="chatgpt-harness-selftest-"))
         source = synthetic_root / "synthetic.zip"
@@ -1151,6 +1297,11 @@ def main() -> int:
         parser.error("--heartbeat-seconds must be positive")
     if args.self_test_cleanup_delay_seconds < 0:
         parser.error("--self-test-cleanup-delay-seconds must be nonnegative")
+    samples: list[dict[str, Any]] = []
+    synthetic_fixture_cleanup: dict[str, Any] = {
+        "attempted": False,
+        "complete": True,
+    }
     try:
         samples = [
             _run_once(
@@ -1168,10 +1319,27 @@ def main() -> int:
         ]
     finally:
         if synthetic_root is not None:
-            _remove_tree_bounded(
+            synthetic_fixture_cleanup = _remove_tree_bounded(
                 synthetic_root,
                 hard_deadline=time.monotonic() + 5.0,
+                force_failure=args.self_test_outer_cleanup_failure,
             )
+            if (
+                args.self_test_outer_cleanup_failure
+                and not synthetic_fixture_cleanup.get("complete")
+            ):
+                synthetic_fixture_cleanup["recovery_cleanup"] = (
+                    _remove_tree_bounded(
+                        synthetic_root,
+                        hard_deadline=time.monotonic() + 5.0,
+                    )
+                )
+    canonical_runs_success = bool(samples) and all(
+        sample.get("success") for sample in samples
+    )
+    acceptance_success = bool(
+        canonical_runs_success and synthetic_fixture_cleanup.get("complete")
+    )
     output = {
         "schema": "chatgpt-sqlite-webui-real-pipeline-v3",
         "environment": {
@@ -1182,9 +1350,21 @@ def main() -> int:
         "runs": len(samples),
         "aggregate": _aggregate(samples),
         "samples": samples,
+        "canonical_runs_success": canonical_runs_success,
+        "synthetic_fixture_cleanup": synthetic_fixture_cleanup,
+        "outer_cleanup_complete": bool(synthetic_fixture_cleanup.get("complete")),
+        "outer_cleanup_warning": (
+            None
+            if synthetic_fixture_cleanup.get("complete")
+            else synthetic_fixture_cleanup.get("error_type", "cleanup_incomplete")
+        ),
+        "outer_cleanup_remaining_owned_path": bool(
+            synthetic_fixture_cleanup.get("remaining_path")
+        ),
+        "acceptance_success": acceptance_success,
     }
     print(json.dumps(output, sort_keys=True, separators=(",", ":")))
-    return 0 if all(sample.get("success") for sample in samples) else 1
+    return 0 if acceptance_success else 1
 
 
 if __name__ == "__main__":

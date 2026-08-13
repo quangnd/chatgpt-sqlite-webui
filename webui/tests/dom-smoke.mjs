@@ -94,6 +94,7 @@ function assertStaticFrontendContracts() {
   assert.ok(paneSource.includes("copyableVisibleNodeIds.length > MAX_VISIBLE_COPY_SELECTION"), "an oversized visible selection must be rejected before the request");
   assert.ok(paneSource.includes("copyableVisibleNodeIds.length === 0"), "Copy visible must be disabled when no loaded message can be copied");
   assert.ok(messageBlockSource.includes("message.display_text_resolver_input_truncated"), "initial reader metadata must expose resolver incompleteness separately from unknown total length");
+  assert.ok(messageBlockSource.includes("attempt === 0 ? activeAnchorCursor : null"), "an exact raw hit must reuse its signed cursor when copying from offset zero and fall back only once");
   assert.ok(i18nSource.includes("displayRecoveryIncomplete"), "incomplete raw recovery should have an accessible localized warning");
   assert.ok(messageBlockSource.includes("JSON.stringify([conversationId, message.node_id"), "message state keys should use collision-free tuple serialization");
   assert.ok(messageBlockSource.includes('hasOwnProperty.call(savedState, "displayNextOffset")'), "terminal next_offset=null must survive remount");
@@ -114,6 +115,9 @@ function assertStaticFrontendContracts() {
   }
   assert.equal(appSource.includes("focusIndex"), false, "unreachable sidebar navigation state should be removed");
   assert.ok(appSource.includes("appliedShareStateRef"), "Copy URL should serialize one accepted search/list/selection context");
+  assert.ok(appSource.includes('window.addEventListener("popstate", restore)'), "Back/Forward should restore committed shareable state");
+  assert.ok(appSource.includes('mode === "push" ? "pushState" : "replaceState"'), "history writes should distinguish committed boundaries from live replacement");
+  assert.ok(appSource.includes("listControllerRef.current?.abort()"), "history restoration should abort stale list requests");
   for (const selector of ["button", "a[href]", "summary", "[role='button']", "[role='menuitem']", "[tabindex]:not([tabindex='-1'])"]) {
     assert.ok(interactionSource.includes(selector), `interactive target helper should recognize ${selector}`);
   }
@@ -248,6 +252,8 @@ function conversation(id, title, mapping, currentNode, ts) {
     mapping,
   };
 }
+
+const historyLongConversationId = `history/special?${"長🙂".repeat(120)}#tail`;
 
 function sequenceNodeId(idx) {
   return `seq-${String(999 - idx).padStart(3, "0")}`;
@@ -471,6 +477,11 @@ function makeSyntheticConversations() {
     u: node("u", "root", "user", "<script>window.__fallbackInjected=true</script> safe text", 2_100_000_001),
   };
   conversations.push(conversation(fallbackId, "<img src=x onerror=window.__fallbackInjected=true>", fallbackMapping, "u", 2_100_000_000));
+  const historyMapping = {
+    root: root(["u"]),
+    u: node("u", "root", "user", "Synthetic history selection outside the first list page.", 1_700_000_001),
+  };
+  conversations.push(conversation(historyLongConversationId, "DOM History Long Special ID", historyMapping, "u", 1_700_000_000));
   return conversations;
 }
 
@@ -507,6 +518,20 @@ async function waitForCount(page, selector, min) {
     { selector, min },
     { timeout: 20_000 },
   );
+}
+
+async function activateLoadMore(page) {
+  await page.waitForFunction(() => {
+    const button = document.querySelector("button.load-more");
+    return Boolean(
+      button
+      && button.isConnected
+      && !button.disabled
+      && button.textContent?.trim() === "Load more"
+      && !document.querySelector('[data-testid="search-loading-progress"]'),
+    );
+  }, undefined, { timeout: 20_000 });
+  await page.locator("button.load-more").evaluate((button) => button.click());
 }
 
 function parseRgb(value) {
@@ -1079,7 +1104,7 @@ async function main() {
       undefined,
       { timeout: 20_000 },
     );
-    await page.getByRole("button", { name: "Load more", exact: true }).click();
+    await activateLoadMore(page);
     await listStaleObserved;
     await listClearedObserved;
     await listRefreshObserved;
@@ -1099,12 +1124,152 @@ async function main() {
       await route.continue();
     };
     await page.route("**/api/conversations?**", rejectListTwice);
-    await page.getByRole("button", { name: "Load more", exact: true }).click();
+    await activateLoadMore(page);
     await page.getByText("The archive changed while loading. Try again.", { exact: true }).waitFor({ state: "visible", timeout: 20_000 });
     assert.equal(repeatedListStaleResponses, 2, "a second stale conversation response must stop retrying");
     assert.equal(await page.locator(".conversation-item").count(), 0, "repeated stale responses must not retain the old list snapshot");
     await page.unroute("**/api/conversations?**", rejectListTwice);
     await page.reload({ waitUntil: "networkidle" });
+    await waitForCount(page, ".conversation-item", 20);
+
+    const historyLengthBeforeTyping = await page.evaluate(() => window.history.length);
+    await page.locator("#global-search").pressSequentially("Intel");
+    await page.locator("#global-search").press("Enter");
+    await page.waitForFunction(
+      () => new URL(window.location.href).searchParams.get("q") === "Intel"
+        && document.querySelector(".results-meta")?.textContent?.includes("3 of 3 conversations"),
+      undefined,
+      { timeout: 20_000 },
+    );
+    assert.equal(
+      await page.evaluate(() => window.history.length),
+      historyLengthBeforeTyping + 1,
+      "live typing must reserve one committed history boundary rather than one entry per keystroke",
+    );
+    const committedIntelUrl = page.url();
+    await page.goBack();
+    await page.waitForFunction(
+      () => !new URL(window.location.href).searchParams.has("q")
+        && document.querySelector("#global-search")?.value === ""
+        && document.querySelectorAll(".conversation-item").length >= 20,
+      undefined,
+      { timeout: 20_000 },
+    );
+    await page.goForward();
+    await page.waitForFunction(
+      (expected) => window.location.href === expected
+        && document.querySelector("#global-search")?.value === "Intel"
+        && document.querySelector(".results-meta")?.textContent?.includes("3 of 3 conversations"),
+      committedIntelUrl,
+      { timeout: 20_000 },
+    );
+
+    await page.getByRole("button", { name: /DOM Intel Word Conversation/ }).click();
+    await page.getByRole("heading", { name: "DOM Intel Word Conversation" }).waitFor({ state: "visible", timeout: 20_000 });
+    const intelWordUrl = page.url();
+    await page.getByRole("button", { name: /DOM Intelligence Longer Conversation/ }).click();
+    await page.getByRole("heading", { name: "DOM Intelligence Longer Conversation" }).waitFor({ state: "visible", timeout: 20_000 });
+    await page.goBack();
+    try {
+      await page.waitForFunction(
+        (expected) => window.location.href === expected
+          && document.querySelector(".reader-header h1")?.textContent === "DOM Intel Word Conversation",
+        intelWordUrl,
+        { timeout: 20_000 },
+      );
+    } catch (error) {
+      const historyDiagnostic = await page.evaluate(() => ({
+        url: window.location.href,
+        title: document.querySelector(".reader-header h1")?.textContent ?? null,
+        query: document.querySelector("#global-search")?.value ?? null,
+        error: document.querySelector(".error-box")?.textContent ?? null,
+      }));
+      throw new Error(`selection history restore failed: ${JSON.stringify(historyDiagnostic)} cause=${error instanceof Error ? error.message : String(error)}`);
+    }
+    await page.goForward();
+    await page.getByRole("heading", { name: "DOM Intelligence Longer Conversation" }).waitFor({ state: "visible", timeout: 20_000 });
+
+    await page.evaluate((conversationId) => {
+      window.__nativeFetchForHistory = window.fetch;
+      window.__historyDetailRace = {};
+      window.fetch = (input, init) => {
+        const url = new URL(typeof input === "string" ? input : input.url, window.location.href);
+        const delayed = url.pathname === "/api/by-id/conversation"
+          && url.searchParams.get("conversation_id") === conversationId;
+        if (!delayed) return window.__nativeFetchForHistory(input, init);
+        return new Promise((resolve, reject) => {
+          window.__historyDetailRace.detail = () => window.__nativeFetchForHistory(input, { ...init, signal: undefined }).then(resolve, reject);
+        });
+      };
+      const url = new URL(window.location.href);
+      url.searchParams.set("conversation", conversationId);
+      window.history.pushState({ chatgptArchiveView: true }, "", `${url.pathname}${url.search}`);
+      window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+    }, historyLongConversationId);
+    await page.waitForFunction(() => Boolean(window.__historyDetailRace?.detail), undefined, { timeout: 20_000 });
+    await page.goBack();
+    await page.getByRole("heading", { name: "DOM Intelligence Longer Conversation" }).waitFor({ state: "visible", timeout: 20_000 });
+    await page.evaluate(() => {
+      window.__historyDetailRace.detail();
+    });
+    await page.waitForTimeout(250);
+    assert.equal(await page.getByRole("heading", { name: "DOM Intelligence Longer Conversation" }).count(), 1, "late detail responses from a popped state must not overwrite the restored selection");
+    await page.evaluate(() => { window.fetch = window.__nativeFetchForHistory; });
+    await page.goForward();
+    await page.getByRole("heading", { name: "DOM History Long Special ID" }).waitFor({ state: "visible", timeout: 20_000 });
+    assert.equal(new URL(page.url()).searchParams.get("conversation"), historyLongConversationId, "history must preserve long IDs containing URL punctuation and non-BMP text");
+    await page.goBack();
+    await page.getByRole("heading", { name: "DOM Intelligence Longer Conversation" }).waitFor({ state: "visible", timeout: 20_000 });
+
+    await page.getByLabel("Sort").selectOption("title");
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("sort") === "title" && document.querySelector('[aria-label="Sort"]')?.value === "title");
+    await page.goBack();
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("sort") === null && document.querySelector('[aria-label="Sort"]')?.value === "relevance");
+    await page.goForward();
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("sort") === "title" && document.querySelector('[aria-label="Sort"]')?.value === "title");
+    await page.locator(".advanced-panel summary").click();
+    await page.getByLabel("Role").selectOption("assistant");
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("role") === "assistant" && document.querySelector('.advanced-grid select')?.value === "assistant");
+    await page.goBack();
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("role") === null && document.querySelector('.advanced-grid select')?.value === "");
+    await page.goForward();
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("role") === "assistant" && document.querySelector('.advanced-grid select')?.value === "assistant");
+
+    await page.getByLabel("Search path").selectOption("all");
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("path") === "all");
+    await page.goBack();
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("path") === null && document.querySelector('[aria-label="Search path"]')?.value === "current");
+    await page.goForward();
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("path") === "all" && document.querySelector('[aria-label="Search path"]')?.value === "all");
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByLabel("Message layout").selectOption("classic");
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.messageLayout === "classic" && new URL(window.location.href).searchParams.get("layout") === "classic");
+    await page.goBack();
+    await page.waitForFunction(() => document.documentElement.dataset.messageLayout === "chat" && new URL(window.location.href).searchParams.get("layout") === null);
+    await page.goForward();
+    await page.waitForFunction(() => document.documentElement.dataset.messageLayout === "classic" && new URL(window.location.href).searchParams.get("layout") === "classic");
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByLabel("Message layout").selectOption("chat");
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.messageLayout === "chat");
+
+    await page.goto(`${baseUrl}?show_internal=false`, { waitUntil: "networkidle" });
+    const historyInternalToggle = page.getByLabel("Show internal messages");
+    await historyInternalToggle.waitFor({ state: "visible" });
+    assert.equal(await historyInternalToggle.isChecked(), false, "explicit history baseline must hide internal messages");
+    await historyInternalToggle.check();
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("show_internal") === "true");
+    await page.goBack();
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("show_internal") !== "true"
+      && document.querySelector('.reader-actions .toggle-inline input[type="checkbox"]')?.checked === false);
+    await page.goForward();
+    await page.waitForFunction(() => new URL(window.location.href).searchParams.get("show_internal") === "true"
+      && document.querySelector('.reader-actions .toggle-inline input[type="checkbox"]')?.checked === true);
+    await historyInternalToggle.uncheck();
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
     await waitForCount(page, ".conversation-item", 20);
     const importButton = page.getByTestId("import-zip-button");
     await importButton.focus();
@@ -1286,17 +1451,21 @@ async function main() {
     await resizer.focus();
     await page.keyboard.press("ArrowRight");
     assert.equal(Number(await resizer.getAttribute("aria-valuenow")), widthBefore + 10, "sidebar resizer should support keyboard arrows");
-    const pointerWidths = await resizer.evaluate((node) => {
+    const pointerWidths = await resizer.evaluate(async (node) => {
       node.setPointerCapture = () => undefined;
       node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 7, clientX: 410 }));
       window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 7, clientX: 430 }));
+      await new Promise((resolve) => {
+        const observe = () => Number(node.getAttribute("aria-valuenow")) === 430
+          ? resolve()
+          : requestAnimationFrame(observe);
+        observe();
+      });
       const during = Number(node.getAttribute("aria-valuenow"));
-      window.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 7, clientX: 430 }));
+      node.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 7, clientX: 430 }));
       window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId: 7, clientX: 520 }));
-      return new Promise((resolve) => requestAnimationFrame(() => resolve({
-        during,
-        afterCancel: Number(node.getAttribute("aria-valuenow")),
-      })));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return { during, afterCancel: Number(node.getAttribute("aria-valuenow")) };
     });
     assert.equal(pointerWidths.afterCancel, pointerWidths.during, "pointercancel must remove sidebar drag listeners immediately");
 
@@ -1603,9 +1772,17 @@ async function main() {
       const readerText = await page.locator(".reader").textContent({ timeout: 1000 }).catch(() => "");
       throw new Error(`long conversation messages did not render; api_count=${apiMessages.items?.length ?? 0} total=${apiMessages.total ?? "unknown"} reader=${JSON.stringify((readerText || "").slice(0, 160))} diagnostics=${browserDiagnostics.join(" | ")}`);
     }
-    const assistantBubble = await page.locator(".message-row-assistant .message").first().boundingBox();
-    const userBubble = await page.locator(".message-row-user .message").first().boundingBox();
-    assert.ok(assistantBubble && userBubble && userBubble.x > assistantBubble.x, "chat layout should align user messages to the right of assistant messages");
+    const chatGeometryHandle = await page.waitForFunction(() => {
+      const assistant = document.querySelector(".message-row-assistant .message");
+      const user = document.querySelector(".message-row-user .message");
+      if (!assistant || !user) return false;
+      const assistantBox = assistant.getBoundingClientRect();
+      const userBox = user.getBoundingClientRect();
+      if (assistantBox.width <= 0 || userBox.width <= 0) return false;
+      return { assistantX: assistantBox.x, userX: userBox.x };
+    }, undefined, { timeout: 20_000 });
+    const chatGeometry = await chatGeometryHandle.jsonValue();
+    assert.ok(chatGeometry.userX > chatGeometry.assistantX, "chat layout should align user messages to the right of assistant messages");
 
     let emptyVisibleCopyRequests = 0;
     const emptyVisibleCopyListener = (request) => {

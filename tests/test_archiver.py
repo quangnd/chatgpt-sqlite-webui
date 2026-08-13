@@ -823,6 +823,33 @@ class ArchiverTests(unittest.TestCase):
             self.assertIn("archive.sqlite3-journal", buf.getvalue())
             self.assertTrue(blocked.exists())
 
+    def test_clean_and_delivery_checks_preserve_unknown_old_release_zip(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            old_release = base / "old-release.zip"
+            original = b"user-owned-old-release"
+            old_release.write_bytes(original)
+            cache = base / "__pycache__"
+            cache.mkdir()
+            (cache / "generated.pyc").write_bytes(b"generated")
+
+            with mock.patch.object(
+                sys,
+                "argv",
+                ["clean_generated_artifacts.py", "--root", str(base)],
+            ), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(clean_generated_main(), 0)
+            self.assertEqual(old_release.read_bytes(), original)
+            self.assertFalse(cache.exists())
+
+            with mock.patch.object(
+                sys,
+                "argv",
+                ["check_delivery_clean.py", "--mode", "runnable", str(base)],
+            ), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(delivery_clean_main(), 1)
+            self.assertEqual(old_release.read_bytes(), original)
+
     def test_dom_smoke_python_resolution_self_test(self):
         node = __import__("shutil").which("node")
         if not node:
@@ -903,6 +930,14 @@ class ArchiverTests(unittest.TestCase):
 
         for path in readmes:
             text = path.read_text(encoding="utf-8")
+            self.assertEqual(
+                text.count(
+                    "python chatgpt_archive.py web --db "
+                    "archive/chatgpt_archive.db --port 8787"
+                ),
+                1,
+                f"{path.name} has a duplicate local Web startup command",
+            )
             fenced_blocks.append(re.findall(r"```[^\n]*\n.*?\n```", text, flags=re.S))
             document_shapes.append(document_shape(text))
             env_names.append(sorted(set(re.findall(r"CHATGPT_ARCHIVE_[A-Z0-9_]+", text))))
@@ -938,7 +973,7 @@ class ArchiverTests(unittest.TestCase):
             lowered = text.lower()
             self.assertIn("windows", lowered)
             self.assertIn("powershell", lowered)
-        self.assertEqual(len(fenced_blocks[0]), 38)
+        self.assertEqual(len(fenced_blocks[0]), 36)
         self.assertTrue(all(blocks == fenced_blocks[0] for blocks in fenced_blocks[1:]))
         self.assertTrue(all(shape == document_shapes[0] for shape in document_shapes[1:]))
         self.assertTrue(all(names == env_names[0] for names in env_names[1:]))
@@ -3699,6 +3734,7 @@ class ArchiverTests(unittest.TestCase):
                 "chatgpt_export_archiver/search.py", "chatgpt_export_archiver/web_api.py",
                 "tests/__init__.py", "tests/test_archiver.py", "tests/test_web_api.py", "tests/test_round12.py",
                 "tools/acceptance_real_pipeline.py", "tools/acceptance_scale.py",
+                "tools/process_watchdog.py",
                 "tools/check_delivery_clean.py", "tools/clean_generated_artifacts.py",
                 "tools/make_release_zip.py", "tools/verify_web_hash_lock.py",
                 "webui/src/App.tsx", "webui/src/i18n.ts", "webui/src/components/ConversationPane.tsx",

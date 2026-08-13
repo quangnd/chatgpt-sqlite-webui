@@ -41,6 +41,7 @@ from chatgpt_export_archiver.scanner import (  # noqa: E402
     _iter_utf8_chunks,
 )
 from chatgpt_export_archiver.exporter import export_conversations  # noqa: E402
+from tools.process_watchdog import terminate_kill_reap  # noqa: E402
 
 
 def _peak_rss_bytes() -> int:
@@ -712,6 +713,19 @@ def _aggregate(samples: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _terminate_kill_reap(
+    process: subprocess.Popen[str],
+    *,
+    timeout_seconds: float = 0.75,
+    owned_process_group: bool = False,
+) -> tuple[str, str, dict[str, Any]]:
+    return terminate_kill_reap(
+        process,
+        timeout_seconds=timeout_seconds,
+        owned_process_group=owned_process_group,
+    )
+
+
 def _run_worker_bounded(
     command: list[str], *, hard_seconds: float, heartbeat_seconds: float
 ) -> dict[str, Any]:
@@ -723,29 +737,24 @@ def _run_worker_bounded(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env={key: value for key, value in os.environ.items() if key != "PYTHONTRACEMALLOC"},
+        start_new_session=os.name == "posix",
     )
     deadline = started + hard_seconds
-    terminated = False
-    killed = False
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            process.terminate()
-            terminated = True
-            try:
-                stdout, stderr = process.communicate(timeout=0.25)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                killed = True
-                stdout, stderr = process.communicate(timeout=0.25)
+            stdout, stderr, lifecycle = _terminate_kill_reap(
+                process,
+                owned_process_group=True,
+            )
             return {
                 "worker_failed": True,
                 "hard_timeout": True,
                 "worker_pid": process.pid,
-                "worker_return_code": process.returncode,
-                "terminated": terminated,
-                "killed": killed,
-                "reaped": process.poll() is not None,
+                "worker_return_code": lifecycle["return_code"],
+                "terminated": lifecycle["terminate_attempted"],
+                "killed": lifecycle["kill_attempted"],
+                **lifecycle,
                 "stdout_present": bool(stdout),
                 "stderr_present": bool(stderr),
                 "wall_seconds": time.monotonic() - started,
@@ -768,9 +777,14 @@ def _run_worker_bounded(
         "hard_timeout": False,
         "worker_pid": process.pid,
         "worker_return_code": process.returncode,
-        "terminated": terminated,
-        "killed": killed,
+        "child_pid": process.pid,
+        "return_code": process.returncode,
+        "terminate_attempted": False,
+        "kill_attempted": False,
+        "terminated": False,
+        "killed": False,
         "reaped": process.poll() is not None,
+        "reap_incomplete": process.poll() is None,
         "stderr_present": bool(stderr),
     }
     if process.returncode != 0:

@@ -903,6 +903,16 @@ def _run_import_pipeline_locked(
         if progress_callback:
             progress_callback(stage, dict(summary))
 
+    proof_stages_notified: set[str] = set()
+
+    def notify_proof(stage: str) -> None:
+        """Publish each run-level proof boundary at most once."""
+
+        if stage in proof_stages_notified:
+            return
+        proof_stages_notified.add(stage)
+        notify(stage)
+
     def record_duplicate_warning(parsed: Any) -> None:
         record_warning(
             conn,
@@ -953,6 +963,7 @@ def _run_import_pipeline_locked(
         if not selected:
             summary["failure_code"] = "no_conversation_sources"
             raise ImportPipelineError("no_conversation_sources", stage="input_preflight", run_id=run_id)
+        notify_proof("source_selection_completed")
         record_source_entries(conn, run_id, entries)
         summary["source_scan_seconds"] = _elapsed(source_scan_started)
         selected_json_bytes = sum(max(0, int(entry.size)) for entry in selected)
@@ -970,6 +981,7 @@ def _run_import_pipeline_locked(
             ),
             existing_database_bytes=existing_database_bytes,
         )
+        notify_proof("source_preflight_completed")
         try:
             capacity = require_free_space(
                 db_path,
@@ -989,6 +1001,7 @@ def _run_import_pipeline_locked(
             ) from exc
         summary["disk_preflight_required_bytes"] = capacity["required_bytes"]
         summary["disk_preflight_free_bytes"] = capacity["free_bytes"]
+        notify_proof("disk_admission_completed")
         disk_guard = DiskSpaceGuard(db_path, "import_disk_space_insufficient")
         notify("source_scan_complete")
 
@@ -1078,6 +1091,8 @@ def _run_import_pipeline_locked(
             if not batch:
                 return
 
+            notify_proof("canonical_import_entered")
+
             def ensure_bulk_generation_started() -> None:
                 nonlocal bulk_generation_started
                 if not bulk_generation_started:
@@ -1126,6 +1141,7 @@ def _run_import_pipeline_locked(
                 batch_usage[name] = 0
 
         parse_started = time.perf_counter()
+        notify_proof("json_parser_entered")
         notify("json_parse_started")
         def classified_source_sessions():
             try:
@@ -1216,6 +1232,7 @@ def _run_import_pipeline_locked(
                 idx += 1
             flush_batch(parsed_conversations)
             notify("shard_complete")
+        notify_proof("json_parser_completed")
         summary["parse_and_upsert_seconds"] = _elapsed(parse_started)
         summary["import_batch_average_input_bytes"] = (
             summary["import_batch_total_input_bytes"] // summary["import_batch_count"]
@@ -1406,6 +1423,14 @@ def _run_import_pipeline_locked(
         raise pipeline_error from exc if pipeline_error is not exc else None
     if not import_succeeded:
         raise RuntimeError("import did not complete")
+    if "canonical_import_entered" in proof_stages_notified:
+        try:
+            notify_proof("canonical_import_committed")
+        except Exception as exc:
+            LOGGER.warning(
+                "progress_callback_after_commit_failed %s",
+                type(exc).__name__,
+            )
     if delete_input_on_success:
         recovery_required = False
         try:

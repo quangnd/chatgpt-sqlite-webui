@@ -172,12 +172,6 @@ python chatgpt_archive.py export --db archive/chatgpt_archive.db --format md --o
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 ```
 
-Web UI を起動します。
-
-```bash
-python chatgpt_archive.py web --db archive/chatgpt_archive.db --port 8787
-```
-
 ## インポートモード
 
 大規模アーカイブでは次のコマンドを推奨します。
@@ -200,11 +194,7 @@ python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_Z
 
 ## Web UI ワークフロー
 
-次のコマンドでローカル Web UI を起動します。既存データベースを開くことも、データベースなしで起動してブラウザーから ZIP をインポートすることもできます。リーダーはページング対応のチャット/クラシック表示、検索、内部メッセージ制御、コピー、ダウンロードを提供します。
-
-```bash
-python chatgpt_archive.py web --port 8787
-```
+セットアップにある Web 起動コマンドを使います。既存データベースを開くことも、データベースなしで起動して ZIP をインポートすることもでき、ページング対応のチャット/クラシック表示、検索、内部メッセージ制御、コピー、ダウンロードを利用できます。古いエクスポートデータから見つかった非常に長い一致内容も最後まで開いてコピーできます。一時的な検索セッションが期限切れになった場合は、もう一度検索してください。ブラウザーの戻る/進むは確定した検索、フィルター、パス、会話選択、レイアウトを復元し、入力中のキーごとに履歴を追加しません。
 
 ## Web アップロードの安全制限
 

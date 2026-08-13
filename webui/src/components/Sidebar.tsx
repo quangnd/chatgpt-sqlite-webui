@@ -7,6 +7,7 @@ interface Props {
   t: (key: string) => string;
   query: string;
   setQuery: (value: string) => void;
+  onCommitSearch: () => void;
   sort: SortMode;
   setSort: (value: SortMode) => void;
   path: PathMode;
@@ -15,6 +16,7 @@ interface Props {
   setMatchMode: (value: MatchMode) => void;
   filters: SearchFilters;
   setFilters: (value: SearchFilters) => void;
+  onCommitFilters: (value: SearchFilters) => void;
   conversations: ConversationSummary[];
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -35,8 +37,13 @@ export default function Sidebar(props: Props) {
   const effectivePath = querySyntax.pathOverride || props.path;
   const effectiveScope = querySyntax.scopeOverride || props.filters.scope;
   const hasSearchContext = Boolean(props.query || props.filters.role || props.filters.title || props.filters.exact || props.filters.exclude || props.filters.after || props.filters.before || props.filters.source);
-  const updateFilter = (key: keyof SearchFilters, value: string) => {
-    props.setFilters({ ...props.filters, [key]: value });
+  const updateFilter = (key: keyof SearchFilters, value: string, commit = false) => {
+    const next = { ...props.filters, [key]: value };
+    if (commit) props.onCommitFilters(next);
+    else props.setFilters(next);
+  };
+  const commitTextFilter = (key: keyof SearchFilters, value: string) => {
+    updateFilter(key, value, true);
   };
 
   const handleScroll = () => {
@@ -54,6 +61,12 @@ export default function Sidebar(props: Props) {
           id="global-search"
           value={props.query}
           onChange={(event) => props.setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              props.onCommitSearch();
+            }
+          }}
           placeholder={props.t("searchPlaceholder")}
           maxLength={500}
         />
@@ -86,7 +99,7 @@ export default function Sidebar(props: Props) {
           <div className="advanced-grid">
             <label>
               {props.t("role")}
-              <select value={props.filters.role} onChange={(event) => updateFilter("role", event.target.value)}>
+              <select value={props.filters.role} onChange={(event) => updateFilter("role", event.target.value, true)}>
                 <option value="">{props.t("all")}</option>
                 <option value="user">{props.t("user")}</option>
                 <option value="assistant">{props.t("assistant")}</option>
@@ -98,7 +111,7 @@ export default function Sidebar(props: Props) {
             </label>
             <label>
               {props.t("scope")}
-              <select value={effectiveScope} onChange={(event) => updateFilter("scope", event.target.value as SearchScope)} disabled={Boolean(querySyntax.scopeOverride)}>
+              <select value={effectiveScope} onChange={(event) => updateFilter("scope", event.target.value as SearchScope, true)} disabled={Boolean(querySyntax.scopeOverride)}>
                 <option value="all">{props.t("titleMessages")}</option>
                 <option value="title">{props.t("titleOnly")}</option>
                 <option value="message">{props.t("messagesOnly")}</option>
@@ -107,27 +120,27 @@ export default function Sidebar(props: Props) {
             </label>
             <label>
               {props.t("titleContains")}
-              <input value={props.filters.title} onChange={(event) => updateFilter("title", event.target.value)} maxLength={200} />
+              <input value={props.filters.title} onChange={(event) => updateFilter("title", event.target.value)} onBlur={(event) => commitTextFilter("title", event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) commitTextFilter("title", event.currentTarget.value); }} maxLength={200} />
             </label>
             <label>
               {props.t("exactPhrase")}
-              <input value={props.filters.exact} onChange={(event) => updateFilter("exact", event.target.value)} maxLength={300} />
+              <input value={props.filters.exact} onChange={(event) => updateFilter("exact", event.target.value)} onBlur={(event) => commitTextFilter("exact", event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) commitTextFilter("exact", event.currentTarget.value); }} maxLength={300} />
             </label>
             <label>
               {props.t("exclude")}
-              <input value={props.filters.exclude} onChange={(event) => updateFilter("exclude", event.target.value)} maxLength={200} />
+              <input value={props.filters.exclude} onChange={(event) => updateFilter("exclude", event.target.value)} onBlur={(event) => commitTextFilter("exclude", event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) commitTextFilter("exclude", event.currentTarget.value); }} maxLength={200} />
             </label>
             <label>
               {props.t("sourceShard")}
-              <input value={props.filters.source} onChange={(event) => updateFilter("source", event.target.value)} maxLength={200} placeholder="conversations-000.json" />
+              <input value={props.filters.source} onChange={(event) => updateFilter("source", event.target.value)} onBlur={(event) => commitTextFilter("source", event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) commitTextFilter("source", event.currentTarget.value); }} maxLength={200} placeholder="conversations-000.json" />
             </label>
             <label>
               {props.t("after")}
-              <input type="date" value={props.filters.after} onChange={(event) => updateFilter("after", event.target.value)} />
+              <input type="date" value={props.filters.after} onChange={(event) => updateFilter("after", event.target.value, true)} />
             </label>
             <label>
               {props.t("before")}
-              <input type="date" value={props.filters.before} onChange={(event) => updateFilter("before", event.target.value)} />
+              <input type="date" value={props.filters.before} onChange={(event) => updateFilter("before", event.target.value, true)} />
             </label>
           </div>
         </details>

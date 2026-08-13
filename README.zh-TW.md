@@ -172,12 +172,6 @@ python chatgpt_archive.py export --db archive/chatgpt_archive.db --format md --o
 python chatgpt_archive.py web-index --db archive/chatgpt_archive.db
 ```
 
-啟動 Web UI：
-
-```bash
-python chatgpt_archive.py web --db archive/chatgpt_archive.db --port 8787
-```
-
 ## 匯入模式
 
 建議的大型封存指令是：
@@ -200,11 +194,7 @@ python chatgpt_archive.py import --db archive/chatgpt_archive.db --input "$NEW_Z
 
 ## Web UI 流程
 
-使用下方命令啟動本機 Web UI。它可開啟現有資料庫，也可在沒有資料庫時啟動並從瀏覽器匯入 ZIP。閱讀器提供分頁的聊天與經典版面、搜尋、內部訊息控制、複製和下載。
-
-```bash
-python chatgpt_archive.py web --port 8787
-```
+使用安裝部分的 Web 啟動命令。頁面可開啟現有資料庫，也可在沒有資料庫時啟動並匯入 ZIP，並提供分頁的聊天與經典版面、搜尋、內部訊息控制、複製和下載。從舊匯出資料找回的超長符合內容也可完整開啟和複製；如果暫時搜尋工作階段已過期，重新搜尋即可。瀏覽器上一頁和下一頁會還原已提交的搜尋、篩選、路徑、對話選擇和版面，輸入文字時不會為每個按鍵增加歷程記錄。
 
 ## Web 上傳安全限制
 

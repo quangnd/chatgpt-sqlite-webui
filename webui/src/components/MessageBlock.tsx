@@ -197,7 +197,7 @@ export default function MessageBlock({ message, conversationId, stateContextKey,
       let complete = "";
       for (let attempt = 0; attempt < 2; attempt += 1) {
         let offset = 0;
-        let cursor: string | null = null;
+        let cursor: string | null = attempt === 0 ? activeAnchorCursor : null;
         let candidate = "";
         let candidateBytes = 0;
         try {
@@ -349,6 +349,7 @@ export default function MessageBlock({ message, conversationId, stateContextKey,
       setExpandedText(chunk.display_text);
       setDisplayNextOffset(null);
       setDisplayNextCursor(null);
+      if (chunk.resolver_input_truncated || !chunk.total_chars_exact) setDisplayRecoveryIncomplete(true);
       setActiveWindowRange({ start, end });
       if (highlightFrameRef.current !== null) {
         window.cancelAnimationFrame(highlightFrameRef.current);
