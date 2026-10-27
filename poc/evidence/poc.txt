@@ -1,0 +1,16 @@
+test_bad_element_tolerated (test_archive_poc.ArchivePOC.test_bad_element_tolerated) ... ok
+test_branches (test_archive_poc.ArchivePOC.test_branches) ... ok
+test_crc_corruption_rejected (test_archive_poc.ArchivePOC.test_crc_corruption_rejected) ... ok
+test_initial_import (test_archive_poc.ArchivePOC.test_initial_import) ... ok
+test_missing_conversation_retained (test_archive_poc.ArchivePOC.test_missing_conversation_retained) ... ok
+test_online_sqlite_backup_restore (test_archive_poc.ArchivePOC.test_online_sqlite_backup_restore) ... ok
+test_raw_multimodal_and_metadata_limits (test_archive_poc.ArchivePOC.test_raw_multimodal_and_metadata_limits) ... ok
+test_same_export_twice (test_archive_poc.ArchivePOC.test_same_export_twice) ... ok
+test_snapshot_reconstruction_and_downgrade (test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade) ... ok
+test_truncated_json_rolls_back (test_archive_poc.ArchivePOC.test_truncated_json_rolls_back) ... ok
+test_update_replaces_history (test_archive_poc.ArchivePOC.test_update_replaces_history) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 1.623s
+
+OK

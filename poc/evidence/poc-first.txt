@@ -1,0 +1,45 @@
+test_bad_element_tolerated (test_archive_poc.ArchivePOC.test_bad_element_tolerated) ... ok
+test_branches (test_archive_poc.ArchivePOC.test_branches) ... ok
+test_crc_corruption_rejected (test_archive_poc.ArchivePOC.test_crc_corruption_rejected) ... FAIL
+test_initial_import (test_archive_poc.ArchivePOC.test_initial_import) ... ok
+test_missing_conversation_retained (test_archive_poc.ArchivePOC.test_missing_conversation_retained) ... ok
+test_online_sqlite_backup_restore (test_archive_poc.ArchivePOC.test_online_sqlite_backup_restore) ... ok
+test_raw_multimodal_and_metadata_limits (test_archive_poc.ArchivePOC.test_raw_multimodal_and_metadata_limits) ... ok
+test_same_export_twice (test_archive_poc.ArchivePOC.test_same_export_twice) ... ok
+test_snapshot_reconstruction_and_downgrade (test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade) ... ok
+test_truncated_json_rolls_back (test_archive_poc.ArchivePOC.test_truncated_json_rolls_back) ... FAIL
+test_update_replaces_history (test_archive_poc.ArchivePOC.test_update_replaces_history) ... ok
+
+======================================================================
+FAIL: test_crc_corruption_rejected (test_archive_poc.ArchivePOC.test_crc_corruption_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/chatgpt-sqlite-webui/poc/test_archive_poc.py", line 62, in test_crc_corruption_rejected
+    self.load(p,expected=1)
+  File "/workspace/chatgpt-sqlite-webui/poc/test_archive_poc.py", line 30, in load
+    def load(self,p,db=None,expected=0): return self.command('import','--db',db or self.db,'--input',p,'--rebuild-fts',expected=expected)
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/chatgpt-sqlite-webui/poc/test_archive_poc.py", line 28, in command
+    self.assertEqual(p.returncode,expected,p.stderr+p.stdout)
+AssertionError: 2 != 1 : ERROR: zip_member_crc_failed stage=source_read import_run_id=1
+
+
+======================================================================
+FAIL: test_truncated_json_rolls_back (test_archive_poc.ArchivePOC.test_truncated_json_rolls_back)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/chatgpt-sqlite-webui/poc/test_archive_poc.py", line 59, in test_truncated_json_rolls_back
+    self.load(bad,expected=1); self.assertEqual(before,self.canonical()); self.command('verify','--db',self.db)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/chatgpt-sqlite-webui/poc/test_archive_poc.py", line 30, in load
+    def load(self,p,db=None,expected=0): return self.command('import','--db',db or self.db,'--input',p,'--rebuild-fts',expected=expected)
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/chatgpt-sqlite-webui/poc/test_archive_poc.py", line 28, in command
+    self.assertEqual(p.returncode,expected,p.stderr+p.stdout)
+AssertionError: 2 != 1 : ERROR: invalid_conversation_json stage=json_decode import_run_id=2
+
+
+----------------------------------------------------------------------
+Ran 11 tests in 1.504s
+
+FAILED (failures=2)

@@ -1,0 +1,30 @@
+[
+  {
+    "test": "test_archive_poc.ArchivePOC.test_initial_import",
+    "zip_bytes": 1173,
+    "db_bytes": 118784,
+    "sidecars": {
+      "archive.db-shm": 32768,
+      "archive.db-wal": 0
+    }
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_online_sqlite_backup_restore",
+    "db_bytes": 118784,
+    "backup_bytes": 118784
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_initial_import",
+    "zip_bytes": 1173,
+    "db_bytes": 118784,
+    "sidecars": {
+      "archive.db-shm": 32768,
+      "archive.db-wal": 0
+    }
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_online_sqlite_backup_restore",
+    "db_bytes": 118784,
+    "backup_bytes": 118784
+  }
+]

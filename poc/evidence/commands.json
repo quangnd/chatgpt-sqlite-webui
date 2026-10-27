@@ -1,0 +1,712 @@
+[
+  {
+    "test": "test_archive_poc.ArchivePOC.test_bad_element_tolerated",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-lifb00hm/archive.db",
+      "--input",
+      "/tmp/archive-poc-lifb00hm/partial.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07140475599999263,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 2\nskipped_invalid_elements 2\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001027\nparse_and_upsert_seconds 0.001325\nfts_rebuild_seconds 0.000676\nimport_index_rebuild_seconds 9.3e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.00112\nclose_seconds 0.000201\npost_commit_summary_persistence_seconds 0.000473\ncanonical_pipeline_seconds 0.009591\npipeline_return_seconds 0.010193\nlegacy_pre_commit_seconds 0.00778\nwall_total_seconds 0.010193\ntotal_import_seconds 0.010193\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 3.1e-05\ncli_controlled_wall_seconds 0.055294\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_branches",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-n4z6xp8x/archive.db",
+      "--input",
+      "/tmp/archive-poc-n4z6xp8x/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07223707399998602,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001073\nparse_and_upsert_seconds 0.001247\nfts_rebuild_seconds 0.000912\nimport_index_rebuild_seconds 0.000104\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001117\nclose_seconds 0.000259\npost_commit_summary_persistence_seconds 0.000446\ncanonical_pipeline_seconds 0.009935\npipeline_return_seconds 0.010409\nlegacy_pre_commit_seconds 0.008096\nwall_total_seconds 0.010409\ntotal_import_seconds 0.010409\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.9e-05\ncli_controlled_wall_seconds 0.056623\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_crc_corruption_rejected",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-ln6544o6/archive.db",
+      "--input",
+      "/tmp/archive-poc-ln6544o6/crc.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 2,
+    "wall_seconds": 0.06769822600006137,
+    "stdout": "",
+    "stderr": "ERROR: zip_member_crc_failed stage=source_read import_run_id=1\n"
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_initial_import",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-4ovq6kxb/archive.db",
+      "--input",
+      "/tmp/archive-poc-4ovq6kxb/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.06857900499994685,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001002\nparse_and_upsert_seconds 0.00124\nfts_rebuild_seconds 0.000697\nimport_index_rebuild_seconds 9.1e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001096\nclose_seconds 0.000195\npost_commit_summary_persistence_seconds 0.000471\ncanonical_pipeline_seconds 0.009605\npipeline_return_seconds 0.010175\nlegacy_pre_commit_seconds 0.007828\nwall_total_seconds 0.010175\ntotal_import_seconds 0.010175\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.7e-05\ncli_controlled_wall_seconds 0.053626\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_initial_import",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "verify",
+      "--db",
+      "/tmp/archive-poc-4ovq6kxb/archive.db"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.06622178600002826,
+    "stdout": "ok true\nschema_ok true\nmigration_required false\ncurrent_database_schema_version 6\nrequired_database_schema_version 6\nintegrity_check ok\nlatest_import_run_id 1\nlatest_run_warnings 0\ntotal_warnings 0\nmissing_current_node 0\nbroken_parent_links 0\nconversations_with_zero_nodes 0\nparent_cycles 0\nparent_cycle_nodes 0\nparent_cycle_components 0\nforeign_key_violations 0\nforeign_key_violations_exact true\nforeign_key_check_complete true\nforeign_key_violation_sample_limit 20\nnon_finite_timestamps 0\neffective_current_checked true\neffective_current_exact true\ndiagnostics_partial false\neffective_current_cross_conversation_parent_in_raw_flag_topology 0\neffective_current_cross_conversation_parent_in_selected_chain 0\neffective_current_cycle_detected 0\neffective_current_flags_missing_current_chain_nodes 0\neffective_current_invalid_current_node_flags_used 0\neffective_current_missing_parent_in_raw_flag_topology 0\neffective_current_missing_parent_in_selected_chain 0\neffective_current_multiple_flag_leaves 0\neffective_current_partial_raw_flag_topology 0\neffective_current_partial_selected_chain 0\neffective_current_raw_flag_cycles 0\neffective_current_selected_chain_cycles 0\neffective_current_selected_current_node 1\neffective_current_selected_fallback_all 0\neffective_current_selected_raw_flags 0\neffective_current_valid_current_node_zero_flags 0\nmessage_fts_available true\nmessage_fts_rebuildable true\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_missing_conversation_retained",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-9kjfbxu1/archive.db",
+      "--input",
+      "/tmp/archive-poc-9kjfbxu1/both.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07092841300004693,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 2\nattempted_nodes 6\nattempted_inserted_conversations 2\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 2\ncommitted_nodes 6\nvalid_conversations 2\nnodes 6\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 2\nupdated_conversations 0\nsource_scan_seconds 0.001051\nparse_and_upsert_seconds 0.001489\nfts_rebuild_seconds 0.000707\nimport_index_rebuild_seconds 9.4e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001195\nclose_seconds 0.0002\npost_commit_summary_persistence_seconds 0.000485\ncanonical_pipeline_seconds 0.01003\npipeline_return_seconds 0.010522\nlegacy_pre_commit_seconds 0.008131\nwall_total_seconds 0.010522\ntotal_import_seconds 0.010522\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.5e-05\ncli_controlled_wall_seconds 0.055516\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_missing_conversation_retained",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-9kjfbxu1/archive.db",
+      "--input",
+      "/tmp/archive-poc-9kjfbxu1/one.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07132973599993875,
+    "stdout": "import_run_id 2\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 0\nattempted_updated_conversations 0\nattempted_unchanged_conversations 1\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 1\ninserted_conversations 0\nupdated_conversations 0\nsource_scan_seconds 0.00064\nparse_and_upsert_seconds 0.000561\nfts_rebuild_seconds 0.000778\nimport_index_rebuild_seconds 2e-06\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.000194\nclose_seconds 0.00017\npost_commit_summary_persistence_seconds 0.000522\ncanonical_pipeline_seconds 0.006244\npipeline_return_seconds 0.006792\nlegacy_pre_commit_seconds 0.005343\nwall_total_seconds 0.006792\ntotal_import_seconds 0.006792\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.9e-05\ncli_controlled_wall_seconds 0.05422\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_online_sqlite_backup_restore",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-s6qp1m7u/archive.db",
+      "--input",
+      "/tmp/archive-poc-s6qp1m7u/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07131184900003973,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001087\nparse_and_upsert_seconds 0.001242\nfts_rebuild_seconds 0.00078\nimport_index_rebuild_seconds 9.5e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001132\nclose_seconds 0.0002\npost_commit_summary_persistence_seconds 0.000469\ncanonical_pipeline_seconds 0.009831\npipeline_return_seconds 0.010338\nlegacy_pre_commit_seconds 0.008014\nwall_total_seconds 0.010338\ntotal_import_seconds 0.010338\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.1e-05\ncli_controlled_wall_seconds 0.055354\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_online_sqlite_backup_restore",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "verify",
+      "--db",
+      "/tmp/archive-poc-s6qp1m7u/backup.db"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.06708948699997563,
+    "stdout": "ok true\nschema_ok true\nmigration_required false\ncurrent_database_schema_version 6\nrequired_database_schema_version 6\nintegrity_check ok\nlatest_import_run_id 1\nlatest_run_warnings 0\ntotal_warnings 0\nmissing_current_node 0\nbroken_parent_links 0\nconversations_with_zero_nodes 0\nparent_cycles 0\nparent_cycle_nodes 0\nparent_cycle_components 0\nforeign_key_violations 0\nforeign_key_violations_exact true\nforeign_key_check_complete true\nforeign_key_violation_sample_limit 20\nnon_finite_timestamps 0\neffective_current_checked true\neffective_current_exact true\ndiagnostics_partial false\neffective_current_cross_conversation_parent_in_raw_flag_topology 0\neffective_current_cross_conversation_parent_in_selected_chain 0\neffective_current_cycle_detected 0\neffective_current_flags_missing_current_chain_nodes 0\neffective_current_invalid_current_node_flags_used 0\neffective_current_missing_parent_in_raw_flag_topology 0\neffective_current_missing_parent_in_selected_chain 0\neffective_current_multiple_flag_leaves 0\neffective_current_partial_raw_flag_topology 0\neffective_current_partial_selected_chain 0\neffective_current_raw_flag_cycles 0\neffective_current_selected_chain_cycles 0\neffective_current_selected_current_node 1\neffective_current_selected_fallback_all 0\neffective_current_selected_raw_flags 0\neffective_current_valid_current_node_zero_flags 0\nmessage_fts_available true\nmessage_fts_rebuildable true\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_raw_multimodal_and_metadata_limits",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-ncd0v_kv/archive.db",
+      "--input",
+      "/tmp/archive-poc-ncd0v_kv/raw.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.0718815000000177,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001043\nparse_and_upsert_seconds 0.0013\nfts_rebuild_seconds 0.00074\nimport_index_rebuild_seconds 9.4e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001118\nclose_seconds 0.000241\npost_commit_summary_persistence_seconds 0.00044500000000000003\ncanonical_pipeline_seconds 0.00983\npipeline_return_seconds 0.010287\nlegacy_pre_commit_seconds 0.008009\nwall_total_seconds 0.010287\ntotal_import_seconds 0.010287\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.9e-05\ncli_controlled_wall_seconds 0.056032\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_same_export_twice",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-n9zl8g0d/archive.db",
+      "--input",
+      "/tmp/archive-poc-n9zl8g0d/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.06937757399998645,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001016\nparse_and_upsert_seconds 0.001211\nfts_rebuild_seconds 0.000845\nimport_index_rebuild_seconds 9e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001102\nclose_seconds 0.000221\npost_commit_summary_persistence_seconds 0.00044\ncanonical_pipeline_seconds 0.009606\npipeline_return_seconds 0.010064\nlegacy_pre_commit_seconds 0.007826\nwall_total_seconds 0.010064\ntotal_import_seconds 0.010064\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.4e-05\ncli_controlled_wall_seconds 0.054272\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_same_export_twice",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-n9zl8g0d/archive.db",
+      "--input",
+      "/tmp/archive-poc-n9zl8g0d/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.0671629959999791,
+    "stdout": "import_run_id 2\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 0\nattempted_updated_conversations 0\nattempted_unchanged_conversations 1\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 1\ninserted_conversations 0\nupdated_conversations 0\nsource_scan_seconds 0.000497\nparse_and_upsert_seconds 0.000554\nfts_rebuild_seconds 0.000768\nimport_index_rebuild_seconds 2e-06\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.000193\nclose_seconds 0.000134\npost_commit_summary_persistence_seconds 0.00040199999999999996\ncanonical_pipeline_seconds 0.005648\npipeline_return_seconds 0.006121\nlegacy_pre_commit_seconds 0.004904\nwall_total_seconds 0.006121\ntotal_import_seconds 0.006121\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.8e-05\ncli_controlled_wall_seconds 0.051269\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-3wh8f8gn/archive.db",
+      "--input",
+      "/tmp/archive-poc-3wh8f8gn/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.06988049599999613,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.00103\nparse_and_upsert_seconds 0.001229\nfts_rebuild_seconds 0.000699\nimport_index_rebuild_seconds 9.4e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.00114\nclose_seconds 0.000203\npost_commit_summary_persistence_seconds 0.000481\ncanonical_pipeline_seconds 0.009527\npipeline_return_seconds 0.010073\nlegacy_pre_commit_seconds 0.007686\nwall_total_seconds 0.010073\ntotal_import_seconds 0.010073\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.4e-05\ncli_controlled_wall_seconds 0.053658\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-3wh8f8gn/archive.db",
+      "--input",
+      "/tmp/archive-poc-3wh8f8gn/v2.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07394636700007595,
+    "stdout": "import_run_id 2\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 0\nattempted_updated_conversations 1\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 0\nupdated_conversations 1\nsource_scan_seconds 0.000515\nparse_and_upsert_seconds 0.002009\nfts_rebuild_seconds 0.000842\nimport_index_rebuild_seconds 8.3e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001204\nclose_seconds 0.000141\npost_commit_summary_persistence_seconds 0.00045\ncanonical_pipeline_seconds 0.008894\npipeline_return_seconds 0.009468\nlegacy_pre_commit_seconds 0.007083\nwall_total_seconds 0.009468\ntotal_import_seconds 0.009468\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.8e-05\ncli_controlled_wall_seconds 0.056384\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-3wh8f8gn/restored.db",
+      "--input",
+      "/tmp/archive-poc-3wh8f8gn/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07143027400002211,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001069\nparse_and_upsert_seconds 0.001215\nfts_rebuild_seconds 0.000766\nimport_index_rebuild_seconds 9.2e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001126\nclose_seconds 0.000301\npost_commit_summary_persistence_seconds 0.00044699999999999997\ncanonical_pipeline_seconds 0.009779\npipeline_return_seconds 0.010235\nlegacy_pre_commit_seconds 0.007888\nwall_total_seconds 0.010235\ntotal_import_seconds 0.010235\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.3e-05\ncli_controlled_wall_seconds 0.054799\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "verify",
+      "--db",
+      "/tmp/archive-poc-3wh8f8gn/restored.db"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.06676779199995053,
+    "stdout": "ok true\nschema_ok true\nmigration_required false\ncurrent_database_schema_version 6\nrequired_database_schema_version 6\nintegrity_check ok\nlatest_import_run_id 1\nlatest_run_warnings 0\ntotal_warnings 0\nmissing_current_node 0\nbroken_parent_links 0\nconversations_with_zero_nodes 0\nparent_cycles 0\nparent_cycle_nodes 0\nparent_cycle_components 0\nforeign_key_violations 0\nforeign_key_violations_exact true\nforeign_key_check_complete true\nforeign_key_violation_sample_limit 20\nnon_finite_timestamps 0\neffective_current_checked true\neffective_current_exact true\ndiagnostics_partial false\neffective_current_cross_conversation_parent_in_raw_flag_topology 0\neffective_current_cross_conversation_parent_in_selected_chain 0\neffective_current_cycle_detected 0\neffective_current_flags_missing_current_chain_nodes 0\neffective_current_invalid_current_node_flags_used 0\neffective_current_missing_parent_in_raw_flag_topology 0\neffective_current_missing_parent_in_selected_chain 0\neffective_current_multiple_flag_leaves 0\neffective_current_partial_raw_flag_topology 0\neffective_current_partial_selected_chain 0\neffective_current_raw_flag_cycles 0\neffective_current_selected_chain_cycles 0\neffective_current_selected_current_node 1\neffective_current_selected_fallback_all 0\neffective_current_selected_raw_flags 0\neffective_current_valid_current_node_zero_flags 0\nmessage_fts_available true\nmessage_fts_rebuildable true\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-3wh8f8gn/archive.db",
+      "--input",
+      "/tmp/archive-poc-3wh8f8gn/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07477935800000068,
+    "stdout": "import_run_id 3\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 0\nattempted_updated_conversations 1\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 0\nupdated_conversations 1\nsource_scan_seconds 0.00047\nparse_and_upsert_seconds 0.002039\nfts_rebuild_seconds 0.00082\nimport_index_rebuild_seconds 8.4e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001245\nclose_seconds 0.000141\npost_commit_summary_persistence_seconds 0.000417\ncanonical_pipeline_seconds 0.008566\npipeline_return_seconds 0.009114\nlegacy_pre_commit_seconds 0.006747\nwall_total_seconds 0.009114\ntotal_import_seconds 0.009114\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 3.3e-05\ncli_controlled_wall_seconds 0.056996\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_truncated_json_rolls_back",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-u16usuuu/archive.db",
+      "--input",
+      "/tmp/archive-poc-u16usuuu/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.08120837599994957,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001075\nparse_and_upsert_seconds 0.001237\nfts_rebuild_seconds 0.000693\nimport_index_rebuild_seconds 9.2e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001137\nclose_seconds 0.00022\npost_commit_summary_persistence_seconds 0.000442\ncanonical_pipeline_seconds 0.009812\npipeline_return_seconds 0.01029\nlegacy_pre_commit_seconds 0.007996\nwall_total_seconds 0.01029\ntotal_import_seconds 0.01029\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.5e-05\ncli_controlled_wall_seconds 0.064214\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_truncated_json_rolls_back",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-u16usuuu/archive.db",
+      "--input",
+      "/tmp/archive-poc-u16usuuu/broken.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 2,
+    "wall_seconds": 0.06715230499992231,
+    "stdout": "",
+    "stderr": "ERROR: invalid_conversation_json stage=json_decode import_run_id=2\n"
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_update_replaces_history",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-l8lphkok/archive.db",
+      "--input",
+      "/tmp/archive-poc-l8lphkok/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07019512900001246,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.000995\nparse_and_upsert_seconds 0.001239\nfts_rebuild_seconds 0.00069\nimport_index_rebuild_seconds 9e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001147\nclose_seconds 0.000195\npost_commit_summary_persistence_seconds 0.000442\ncanonical_pipeline_seconds 0.009926\npipeline_return_seconds 0.01036\nlegacy_pre_commit_seconds 0.008126\nwall_total_seconds 0.01036\ntotal_import_seconds 0.01036\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.4e-05\ncli_controlled_wall_seconds 0.054201\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_update_replaces_history",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-l8lphkok/archive.db",
+      "--input",
+      "/tmp/archive-poc-l8lphkok/v2.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07227432100000897,
+    "stdout": "import_run_id 2\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 2\nattempted_inserted_conversations 0\nattempted_updated_conversations 1\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 2\nvalid_conversations 1\nnodes 2\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 0\nupdated_conversations 1\nsource_scan_seconds 0.000501\nparse_and_upsert_seconds 0.001949\nfts_rebuild_seconds 0.000673\nimport_index_rebuild_seconds 8.1e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001135\nclose_seconds 0.000197\npost_commit_summary_persistence_seconds 0.000445\ncanonical_pipeline_seconds 0.008405\npipeline_return_seconds 0.008933\nlegacy_pre_commit_seconds 0.00661\nwall_total_seconds 0.008933\ntotal_import_seconds 0.008933\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.5e-05\ncli_controlled_wall_seconds 0.056191\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_bad_element_tolerated",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-pgiarhgt/archive.db",
+      "--input",
+      "/tmp/archive-poc-pgiarhgt/partial.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07370099399997798,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 2\nskipped_invalid_elements 2\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.00106\nparse_and_upsert_seconds 0.001693\nfts_rebuild_seconds 0.000702\nimport_index_rebuild_seconds 9.9e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001115\nclose_seconds 0.00021\npost_commit_summary_persistence_seconds 0.00057\ncanonical_pipeline_seconds 0.01148\npipeline_return_seconds 0.011951\nlegacy_pre_commit_seconds 0.009567\nwall_total_seconds 0.011951\ntotal_import_seconds 0.011951\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.1e-05\ncli_controlled_wall_seconds 0.057166\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_branches",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-8p5c2lhr/archive.db",
+      "--input",
+      "/tmp/archive-poc-8p5c2lhr/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.0724418859999787,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001078\nparse_and_upsert_seconds 0.001286\nfts_rebuild_seconds 0.000678\nimport_index_rebuild_seconds 0.00012\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001144\nclose_seconds 0.000212\npost_commit_summary_persistence_seconds 0.00044699999999999997\ncanonical_pipeline_seconds 0.009671\npipeline_return_seconds 0.010166\nlegacy_pre_commit_seconds 0.007852\nwall_total_seconds 0.010166\ntotal_import_seconds 0.010166\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 4.3e-05\ncli_controlled_wall_seconds 0.056107\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_crc_corruption_rejected",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-tancrwbt/archive.db",
+      "--input",
+      "/tmp/archive-poc-tancrwbt/crc.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 2,
+    "wall_seconds": 0.08562805700000808,
+    "stdout": "",
+    "stderr": "ERROR: zip_member_crc_failed stage=source_read import_run_id=1\n"
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_initial_import",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-3erge5by/archive.db",
+      "--input",
+      "/tmp/archive-poc-3erge5by/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07998467800007347,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001228\nparse_and_upsert_seconds 0.001474\nfts_rebuild_seconds 0.000676\nimport_index_rebuild_seconds 9.3e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001145\nclose_seconds 0.000217\npost_commit_summary_persistence_seconds 0.00044899999999999996\ncanonical_pipeline_seconds 0.012165\npipeline_return_seconds 0.012954\nlegacy_pre_commit_seconds 0.010335\nwall_total_seconds 0.012954\ntotal_import_seconds 0.012954\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 4.5e-05\ncli_controlled_wall_seconds 0.062113\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_initial_import",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "verify",
+      "--db",
+      "/tmp/archive-poc-3erge5by/archive.db"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07155421600009504,
+    "stdout": "ok true\nschema_ok true\nmigration_required false\ncurrent_database_schema_version 6\nrequired_database_schema_version 6\nintegrity_check ok\nlatest_import_run_id 1\nlatest_run_warnings 0\ntotal_warnings 0\nmissing_current_node 0\nbroken_parent_links 0\nconversations_with_zero_nodes 0\nparent_cycles 0\nparent_cycle_nodes 0\nparent_cycle_components 0\nforeign_key_violations 0\nforeign_key_violations_exact true\nforeign_key_check_complete true\nforeign_key_violation_sample_limit 20\nnon_finite_timestamps 0\neffective_current_checked true\neffective_current_exact true\ndiagnostics_partial false\neffective_current_cross_conversation_parent_in_raw_flag_topology 0\neffective_current_cross_conversation_parent_in_selected_chain 0\neffective_current_cycle_detected 0\neffective_current_flags_missing_current_chain_nodes 0\neffective_current_invalid_current_node_flags_used 0\neffective_current_missing_parent_in_raw_flag_topology 0\neffective_current_missing_parent_in_selected_chain 0\neffective_current_multiple_flag_leaves 0\neffective_current_partial_raw_flag_topology 0\neffective_current_partial_selected_chain 0\neffective_current_raw_flag_cycles 0\neffective_current_selected_chain_cycles 0\neffective_current_selected_current_node 1\neffective_current_selected_fallback_all 0\neffective_current_selected_raw_flags 0\neffective_current_valid_current_node_zero_flags 0\nmessage_fts_available true\nmessage_fts_rebuildable true\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_missing_conversation_retained",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-wd7hz_wc/archive.db",
+      "--input",
+      "/tmp/archive-poc-wd7hz_wc/both.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.08069748000002619,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 2\nattempted_nodes 6\nattempted_inserted_conversations 2\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 2\ncommitted_nodes 6\nvalid_conversations 2\nnodes 6\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 2\nupdated_conversations 0\nsource_scan_seconds 0.001196\nparse_and_upsert_seconds 0.001759\nfts_rebuild_seconds 0.000828\nimport_index_rebuild_seconds 9.7e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001228\nclose_seconds 0.000271\npost_commit_summary_persistence_seconds 0.0006190000000000001\ncanonical_pipeline_seconds 0.011388\npipeline_return_seconds 0.01192\nlegacy_pre_commit_seconds 0.009247\nwall_total_seconds 0.01192\ntotal_import_seconds 0.01192\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.3e-05\ncli_controlled_wall_seconds 0.062351\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_missing_conversation_retained",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-wd7hz_wc/archive.db",
+      "--input",
+      "/tmp/archive-poc-wd7hz_wc/one.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.0700802300000305,
+    "stdout": "import_run_id 2\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 0\nattempted_updated_conversations 0\nattempted_unchanged_conversations 1\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 1\ninserted_conversations 0\nupdated_conversations 0\nsource_scan_seconds 0.000489\nparse_and_upsert_seconds 0.000551\nfts_rebuild_seconds 0.000763\nimport_index_rebuild_seconds 2e-06\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.000192\nclose_seconds 0.00016\npost_commit_summary_persistence_seconds 0.000503\ncanonical_pipeline_seconds 0.005871\npipeline_return_seconds 0.006371\nlegacy_pre_commit_seconds 0.005001\nwall_total_seconds 0.006371\ntotal_import_seconds 0.006371\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.5e-05\ncli_controlled_wall_seconds 0.05462\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_online_sqlite_backup_restore",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-5p_qlxxz/archive.db",
+      "--input",
+      "/tmp/archive-poc-5p_qlxxz/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07298395600003005,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001191\nparse_and_upsert_seconds 0.001263\nfts_rebuild_seconds 0.000731\nimport_index_rebuild_seconds 9.8e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001111\nclose_seconds 0.000212\npost_commit_summary_persistence_seconds 0.000449\ncanonical_pipeline_seconds 0.010004\npipeline_return_seconds 0.010498\nlegacy_pre_commit_seconds 0.008216\nwall_total_seconds 0.010498\ntotal_import_seconds 0.010498\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.9e-05\ncli_controlled_wall_seconds 0.056463\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_online_sqlite_backup_restore",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "verify",
+      "--db",
+      "/tmp/archive-poc-5p_qlxxz/backup.db"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07041512500006775,
+    "stdout": "ok true\nschema_ok true\nmigration_required false\ncurrent_database_schema_version 6\nrequired_database_schema_version 6\nintegrity_check ok\nlatest_import_run_id 1\nlatest_run_warnings 0\ntotal_warnings 0\nmissing_current_node 0\nbroken_parent_links 0\nconversations_with_zero_nodes 0\nparent_cycles 0\nparent_cycle_nodes 0\nparent_cycle_components 0\nforeign_key_violations 0\nforeign_key_violations_exact true\nforeign_key_check_complete true\nforeign_key_violation_sample_limit 20\nnon_finite_timestamps 0\neffective_current_checked true\neffective_current_exact true\ndiagnostics_partial false\neffective_current_cross_conversation_parent_in_raw_flag_topology 0\neffective_current_cross_conversation_parent_in_selected_chain 0\neffective_current_cycle_detected 0\neffective_current_flags_missing_current_chain_nodes 0\neffective_current_invalid_current_node_flags_used 0\neffective_current_missing_parent_in_raw_flag_topology 0\neffective_current_missing_parent_in_selected_chain 0\neffective_current_multiple_flag_leaves 0\neffective_current_partial_raw_flag_topology 0\neffective_current_partial_selected_chain 0\neffective_current_raw_flag_cycles 0\neffective_current_selected_chain_cycles 0\neffective_current_selected_current_node 1\neffective_current_selected_fallback_all 0\neffective_current_selected_raw_flags 0\neffective_current_valid_current_node_zero_flags 0\nmessage_fts_available true\nmessage_fts_rebuildable true\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_raw_multimodal_and_metadata_limits",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-nmuvfmch/archive.db",
+      "--input",
+      "/tmp/archive-poc-nmuvfmch/raw.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07000454900003206,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001027\nparse_and_upsert_seconds 0.001259\nfts_rebuild_seconds 0.000713\nimport_index_rebuild_seconds 9.3e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001169\nclose_seconds 0.000238\npost_commit_summary_persistence_seconds 0.00045\ncanonical_pipeline_seconds 0.009803\npipeline_return_seconds 0.010378\nlegacy_pre_commit_seconds 0.00793\nwall_total_seconds 0.010378\ntotal_import_seconds 0.010378\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 3.1e-05\ncli_controlled_wall_seconds 0.053781\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_same_export_twice",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-dfw_qeq3/archive.db",
+      "--input",
+      "/tmp/archive-poc-dfw_qeq3/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07180284200001097,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001071\nparse_and_upsert_seconds 0.001287\nfts_rebuild_seconds 0.000682\nimport_index_rebuild_seconds 9.2e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001103\nclose_seconds 0.000206\npost_commit_summary_persistence_seconds 0.000441\ncanonical_pipeline_seconds 0.009633\npipeline_return_seconds 0.010318\nlegacy_pre_commit_seconds 0.007867\nwall_total_seconds 0.010318\ntotal_import_seconds 0.010318\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 3.3e-05\ncli_controlled_wall_seconds 0.054982\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_same_export_twice",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-dfw_qeq3/archive.db",
+      "--input",
+      "/tmp/archive-poc-dfw_qeq3/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.06844845199998417,
+    "stdout": "import_run_id 2\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 0\nattempted_updated_conversations 0\nattempted_unchanged_conversations 1\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 1\ninserted_conversations 0\nupdated_conversations 0\nsource_scan_seconds 0.000453\nparse_and_upsert_seconds 0.000682\nfts_rebuild_seconds 0.000783\nimport_index_rebuild_seconds 2e-06\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.000272\nclose_seconds 0.000116\npost_commit_summary_persistence_seconds 0.000475\ncanonical_pipeline_seconds 0.006\npipeline_return_seconds 0.006515\nlegacy_pre_commit_seconds 0.005121\nwall_total_seconds 0.006515\ntotal_import_seconds 0.006515\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.2e-05\ncli_controlled_wall_seconds 0.051652\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-l9fw6zmh/archive.db",
+      "--input",
+      "/tmp/archive-poc-l9fw6zmh/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.0717212220000647,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001061\nparse_and_upsert_seconds 0.00123\nfts_rebuild_seconds 0.000707\nimport_index_rebuild_seconds 9.3e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001192\nclose_seconds 0.0003\npost_commit_summary_persistence_seconds 0.000497\ncanonical_pipeline_seconds 0.009818\npipeline_return_seconds 0.010422\nlegacy_pre_commit_seconds 0.007812\nwall_total_seconds 0.010422\ntotal_import_seconds 0.010422\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.5e-05\ncli_controlled_wall_seconds 0.055723\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-l9fw6zmh/archive.db",
+      "--input",
+      "/tmp/archive-poc-l9fw6zmh/v2.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07095770599994466,
+    "stdout": "import_run_id 2\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 0\nattempted_updated_conversations 1\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 0\nupdated_conversations 1\nsource_scan_seconds 0.000508\nparse_and_upsert_seconds 0.001903\nfts_rebuild_seconds 0.000714\nimport_index_rebuild_seconds 8.3e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001164\nclose_seconds 0.000138\npost_commit_summary_persistence_seconds 0.000412\ncanonical_pipeline_seconds 0.008089\npipeline_return_seconds 0.008675\nlegacy_pre_commit_seconds 0.006359\nwall_total_seconds 0.008675\ntotal_import_seconds 0.008675\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.7e-05\ncli_controlled_wall_seconds 0.054215\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-l9fw6zmh/restored.db",
+      "--input",
+      "/tmp/archive-poc-l9fw6zmh/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07586213399997632,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001113\nparse_and_upsert_seconds 0.001265\nfts_rebuild_seconds 0.000674\nimport_index_rebuild_seconds 9.2e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001155\nclose_seconds 0.000209\npost_commit_summary_persistence_seconds 0.000456\ncanonical_pipeline_seconds 0.009852\npipeline_return_seconds 0.010333\nlegacy_pre_commit_seconds 0.008016\nwall_total_seconds 0.010333\ntotal_import_seconds 0.010333\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.9e-05\ncli_controlled_wall_seconds 0.058139\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "verify",
+      "--db",
+      "/tmp/archive-poc-l9fw6zmh/restored.db"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.06624633199999153,
+    "stdout": "ok true\nschema_ok true\nmigration_required false\ncurrent_database_schema_version 6\nrequired_database_schema_version 6\nintegrity_check ok\nlatest_import_run_id 1\nlatest_run_warnings 0\ntotal_warnings 0\nmissing_current_node 0\nbroken_parent_links 0\nconversations_with_zero_nodes 0\nparent_cycles 0\nparent_cycle_nodes 0\nparent_cycle_components 0\nforeign_key_violations 0\nforeign_key_violations_exact true\nforeign_key_check_complete true\nforeign_key_violation_sample_limit 20\nnon_finite_timestamps 0\neffective_current_checked true\neffective_current_exact true\ndiagnostics_partial false\neffective_current_cross_conversation_parent_in_raw_flag_topology 0\neffective_current_cross_conversation_parent_in_selected_chain 0\neffective_current_cycle_detected 0\neffective_current_flags_missing_current_chain_nodes 0\neffective_current_invalid_current_node_flags_used 0\neffective_current_missing_parent_in_raw_flag_topology 0\neffective_current_missing_parent_in_selected_chain 0\neffective_current_multiple_flag_leaves 0\neffective_current_partial_raw_flag_topology 0\neffective_current_partial_selected_chain 0\neffective_current_raw_flag_cycles 0\neffective_current_selected_chain_cycles 0\neffective_current_selected_current_node 1\neffective_current_selected_fallback_all 0\neffective_current_selected_raw_flags 0\neffective_current_valid_current_node_zero_flags 0\nmessage_fts_available true\nmessage_fts_rebuildable true\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_snapshot_reconstruction_and_downgrade",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-l9fw6zmh/archive.db",
+      "--input",
+      "/tmp/archive-poc-l9fw6zmh/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07196467200003553,
+    "stdout": "import_run_id 3\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 0\nattempted_updated_conversations 1\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 0\nupdated_conversations 1\nsource_scan_seconds 0.000485\nparse_and_upsert_seconds 0.002275\nfts_rebuild_seconds 0.0009\nimport_index_rebuild_seconds 8.3e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001309\nclose_seconds 0.000189\npost_commit_summary_persistence_seconds 0.00043900000000000005\ncanonical_pipeline_seconds 0.008978\npipeline_return_seconds 0.009473\nlegacy_pre_commit_seconds 0.006934\nwall_total_seconds 0.009473\ntotal_import_seconds 0.009473\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.8e-05\ncli_controlled_wall_seconds 0.054559\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_truncated_json_rolls_back",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-c7su7oar/archive.db",
+      "--input",
+      "/tmp/archive-poc-c7su7oar/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.0791318690000935,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001186\nparse_and_upsert_seconds 0.001272\nfts_rebuild_seconds 0.000844\nimport_index_rebuild_seconds 9.4e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001135\nclose_seconds 0.00027\npost_commit_summary_persistence_seconds 0.00045599999999999997\ncanonical_pipeline_seconds 0.010413\npipeline_return_seconds 0.010935\nlegacy_pre_commit_seconds 0.008532\nwall_total_seconds 0.010935\ntotal_import_seconds 0.010935\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.9e-05\ncli_controlled_wall_seconds 0.061239\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_truncated_json_rolls_back",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-c7su7oar/archive.db",
+      "--input",
+      "/tmp/archive-poc-c7su7oar/broken.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 2,
+    "wall_seconds": 0.06532234799999515,
+    "stdout": "",
+    "stderr": "ERROR: invalid_conversation_json stage=json_decode import_run_id=2\n"
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_truncated_json_rolls_back",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "verify",
+      "--db",
+      "/tmp/archive-poc-c7su7oar/archive.db"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.06404860800000733,
+    "stdout": "ok true\nschema_ok true\nmigration_required false\ncurrent_database_schema_version 6\nrequired_database_schema_version 6\nintegrity_check ok\nlatest_import_run_id 2\nlatest_run_warnings 1\ntotal_warnings 1\nmissing_current_node 0\nbroken_parent_links 0\nconversations_with_zero_nodes 0\nparent_cycles 0\nparent_cycle_nodes 0\nparent_cycle_components 0\nforeign_key_violations 0\nforeign_key_violations_exact true\nforeign_key_check_complete true\nforeign_key_violation_sample_limit 20\nnon_finite_timestamps 0\neffective_current_checked true\neffective_current_exact true\ndiagnostics_partial false\neffective_current_cross_conversation_parent_in_raw_flag_topology 0\neffective_current_cross_conversation_parent_in_selected_chain 0\neffective_current_cycle_detected 0\neffective_current_flags_missing_current_chain_nodes 0\neffective_current_invalid_current_node_flags_used 0\neffective_current_missing_parent_in_raw_flag_topology 0\neffective_current_missing_parent_in_selected_chain 0\neffective_current_multiple_flag_leaves 0\neffective_current_partial_raw_flag_topology 0\neffective_current_partial_selected_chain 0\neffective_current_raw_flag_cycles 0\neffective_current_selected_chain_cycles 0\neffective_current_selected_current_node 1\neffective_current_selected_fallback_all 0\neffective_current_selected_raw_flags 0\neffective_current_valid_current_node_zero_flags 0\nmessage_fts_available true\nmessage_fts_rebuildable true\nlatest_warning_type invalid_conversation_json count 1\nwarning_type invalid_conversation_json count 1\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_update_replaces_history",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-hefvnv2v/archive.db",
+      "--input",
+      "/tmp/archive-poc-hefvnv2v/v1.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07721997699991334,
+    "stdout": "import_run_id 1\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 3\nattempted_inserted_conversations 1\nattempted_updated_conversations 0\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 3\nvalid_conversations 1\nnodes 3\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 1\nupdated_conversations 0\nsource_scan_seconds 0.001142\nparse_and_upsert_seconds 0.001284\nfts_rebuild_seconds 0.000789\nimport_index_rebuild_seconds 0.000127\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.001192\nclose_seconds 0.00028\npost_commit_summary_persistence_seconds 0.000512\ncanonical_pipeline_seconds 0.010143\npipeline_return_seconds 0.010755\nlegacy_pre_commit_seconds 0.008139\nwall_total_seconds 0.010755\ntotal_import_seconds 0.010755\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 0.000146\ncli_controlled_wall_seconds 0.057567\n",
+    "stderr": ""
+  },
+  {
+    "test": "test_archive_poc.ArchivePOC.test_update_replaces_history",
+    "command": [
+      "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+      "/workspace/chatgpt-sqlite-webui/chatgpt_archive.py",
+      "import",
+      "--db",
+      "/tmp/archive-poc-hefvnv2v/archive.db",
+      "--input",
+      "/tmp/archive-poc-hefvnv2v/v2.zip",
+      "--rebuild-fts"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.07262897200007501,
+    "stdout": "import_run_id 2\nsource zip\nattempted_valid_conversations 1\nattempted_nodes 2\nattempted_inserted_conversations 0\nattempted_updated_conversations 1\nattempted_unchanged_conversations 0\ncommitted_conversations 1\ncommitted_nodes 2\nvalid_conversations 1\nnodes 2\nwarnings 0\nskipped_invalid_elements 0\nunchanged_conversations 0\ninserted_conversations 0\nupdated_conversations 1\nsource_scan_seconds 0.000465\nparse_and_upsert_seconds 0.001952\nfts_rebuild_seconds 0.00071\nimport_index_rebuild_seconds 8.2e-05\npragma_optimize_seconds 0.0\nfinalize_commit_seconds 0.00112\nclose_seconds 0.000235\npost_commit_summary_persistence_seconds 0.000446\ncanonical_pipeline_seconds 0.008241\npipeline_return_seconds 0.008762\nlegacy_pre_commit_seconds 0.006423\nwall_total_seconds 0.008762\ntotal_import_seconds 0.008762\nrebuild_fts true\noptimize_fts_after_import false\ncli_output_flush_seconds 2.7e-05\ncli_controlled_wall_seconds 0.054478\n",
+    "stderr": ""
+  }
+]

@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+    "poc/reap_run.py",
+    "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "tests",
+    "-v"
+  ],
+  "exit_code": 0,
+  "wall_seconds": 85.38772782700005,
+  "max_child_rss_kib": 381628,
+  "user_seconds": 74.814138,
+  "system_seconds": 3.032347
+}

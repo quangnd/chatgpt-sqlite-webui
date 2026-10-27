@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/workspace/.venvs/chatgpt-sqlite-webui/bin/python",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "poc",
+    "-p",
+    "test_*.py",
+    "-v"
+  ],
+  "exit_code": 1,
+  "wall_seconds": 1.5694238720000158,
+  "max_child_rss_kib": 21504,
+  "user_seconds": 1.347429,
+  "system_seconds": 0.22436599999999998
+}

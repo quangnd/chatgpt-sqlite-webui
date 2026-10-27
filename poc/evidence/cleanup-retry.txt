@@ -1,0 +1,6 @@
+test_real_pipeline_shutdown_proves_owned_grandchild_cleanup (tests.test_resource_security_regressions.ResourceSecurityRegressions.test_real_pipeline_shutdown_proves_owned_grandchild_cleanup) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.223s
+
+OK
