@@ -1,0 +1,17 @@
+{
+  "command": [
+    "python",
+    "poc/reap_run.py",
+    "python",
+    "-m",
+    "unittest",
+    "test_archive_lifecycle",
+    "test_archive_poc",
+    "-v"
+  ],
+  "exit_code": 0,
+  "wall_seconds": 17.53549181300002,
+  "max_child_rss_kib": 60152,
+  "user_seconds": 15.074599,
+  "system_seconds": 2.265906
+}

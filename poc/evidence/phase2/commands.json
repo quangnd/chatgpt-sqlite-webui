@@ -1,0 +1,8 @@
+[
+  "git fetch origin poc/archive-evaluation",
+  "git switch -c poc/archive-evaluation FETCH_HEAD",
+  "PHASE2_EVIDENCE=/tmp/phase2-final PYTHONPATH=poc env -u PYTHONTRACEMALLOC python poc/measure.py /tmp/phase2-final-suite python poc/reap_run.py python -m unittest test_archive_lifecycle test_archive_poc -v",
+  "PHASE2_EVIDENCE=/tmp/phase2-scale-final PYTHONPATH=poc env -u PYTHONTRACEMALLOC python poc/measure.py /tmp/phase2-scale-final-run python poc/reap_run.py python -m unittest test_archive_lifecycle.Lifecycle.test_scale_1000_conversations_lifecycle -v",
+  "git diff --check",
+  "python tools/clean_generated_artifacts.py --fail-on-blocked"
+]

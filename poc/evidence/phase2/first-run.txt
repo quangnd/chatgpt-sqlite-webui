@@ -1,0 +1,38 @@
+test_atomic_manifest_failure_does_not_publish (test_archive_lifecycle.Lifecycle.test_atomic_manifest_failure_does_not_publish) ... ok
+test_backup_restore_rebuild_after_database_loss (test_archive_lifecycle.Lifecycle.test_backup_restore_rebuild_after_database_loss) ... ok
+test_checksum_and_attachment_crc_detected (test_archive_lifecycle.Lifecycle.test_checksum_and_attachment_crc_detected) ... ok
+test_controller_lock_serializes_processes (test_archive_lifecycle.Lifecycle.test_controller_lock_serializes_processes) ... ok
+test_destinations_separate_and_existing_never_overwritten (test_archive_lifecycle.Lifecycle.test_destinations_separate_and_existing_never_overwritten) ... ok
+test_disk_full_simulated_during_preserve_and_import (test_archive_lifecycle.Lifecycle.test_disk_full_simulated_during_preserve_and_import) ... FAIL
+test_duplicate_idempotence_and_original_bytes (test_archive_lifecycle.Lifecycle.test_duplicate_idempotence_and_original_bytes) ... ok
+test_incomplete_backup_and_corruption_fail_closed (test_archive_lifecycle.Lifecycle.test_incomplete_backup_and_corruption_fail_closed) ... ok
+test_interrupted_import_and_generation_publication (test_archive_lifecycle.Lifecycle.test_interrupted_import_and_generation_publication) ... ok
+test_malformed_json_and_corrupt_zip_preserved (test_archive_lifecycle.Lifecycle.test_malformed_json_and_corrupt_zip_preserved) ... ok
+test_mixed_snapshot_equal_and_unknown_times_rejected (test_archive_lifecycle.Lifecycle.test_mixed_snapshot_equal_and_unknown_times_rejected) ... FAIL
+test_ordering_explicit_head_and_per_conversation_regression (test_archive_lifecycle.Lifecycle.test_ordering_explicit_head_and_per_conversation_regression) ... ok
+test_partial_is_not_published (test_archive_lifecycle.Lifecycle.test_partial_is_not_published) ... ok
+test_scale_1000_conversations_lifecycle (test_archive_lifecycle.Lifecycle.test_scale_1000_conversations_lifecycle) ... ok
+test_wal_consistency_backup (test_archive_lifecycle.Lifecycle.test_wal_consistency_backup) ... ok
+
+======================================================================
+FAIL: test_disk_full_simulated_during_preserve_and_import (test_archive_lifecycle.Lifecycle.test_disk_full_simulated_during_preserve_and_import)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/chatgpt-sqlite-webui/poc/test_archive_lifecycle.py", line 203, in test_disk_full_simulated_during_preserve_and_import
+    with self.assertRaises(OSError):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: OSError not raised
+
+======================================================================
+FAIL: test_mixed_snapshot_equal_and_unknown_times_rejected (test_archive_lifecycle.Lifecycle.test_mixed_snapshot_equal_and_unknown_times_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/chatgpt-sqlite-webui/poc/test_archive_lifecycle.py", line 120, in test_mixed_snapshot_equal_and_unknown_times_rejected
+    with self.assertRaises(Rejected):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Rejected not raised
+
+----------------------------------------------------------------------
+Ran 15 tests in 9.401s
+
+FAILED (failures=2)

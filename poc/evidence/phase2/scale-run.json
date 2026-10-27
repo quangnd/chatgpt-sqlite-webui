@@ -1,0 +1,16 @@
+{
+  "command": [
+    "python",
+    "poc/reap_run.py",
+    "python",
+    "-m",
+    "unittest",
+    "test_archive_lifecycle.Lifecycle.test_scale_1000_conversations_lifecycle",
+    "-v"
+  ],
+  "exit_code": 0,
+  "wall_seconds": 6.678097425000033,
+  "max_child_rss_kib": 59888,
+  "user_seconds": 6.10203,
+  "system_seconds": 0.544638
+}

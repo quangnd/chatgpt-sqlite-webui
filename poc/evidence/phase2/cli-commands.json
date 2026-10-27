@@ -1,0 +1,222 @@
+[
+  {
+    "command": [
+      "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+      "-m",
+      "poc.archive_controller",
+      "--root",
+      "<synthetic-temp>/active",
+      "preserve",
+      "<synthetic-temp>/cli.zip"
+    ],
+    "exit_code": 0,
+    "result": {
+      "duplicate": false,
+      "id": "3de510744bf7eb98f62df668ef4e1628e9cb03a0b923bc329435612d3115e627",
+      "status": "ready"
+    }
+  },
+  {
+    "command": [
+      "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+      "-m",
+      "poc.archive_controller",
+      "--root",
+      "<synthetic-temp>/active",
+      "import",
+      "3de510744bf7eb98f62df668ef4e1628e9cb03a0b923bc329435612d3115e627",
+      "--after",
+      "none"
+    ],
+    "exit_code": 0,
+    "result": {
+      "attempt": {
+        "application_sha256": "7dfcebc16d779dfd79fb3219a26d918525b92b0b66110bdae3186dca97cf39ae",
+        "cli": {
+          "diagnostic_bytes": 925,
+          "diagnostic_sha256": "8b3026765193f5d4ac420807f62c61f36f4b0a73c4dfdd806692c5d55009ae80",
+          "exit_code": 0,
+          "seconds": 0.12025394400006917,
+          "stderr_bytes": 0,
+          "warnings": {}
+        },
+        "counts": {
+          "attempted_inserted_conversations": 1,
+          "attempted_nodes": 3,
+          "attempted_unchanged_conversations": 0,
+          "attempted_updated_conversations": 0,
+          "attempted_valid_conversations": 1,
+          "canonical_pipeline_seconds": 0.0,
+          "close_seconds": 0.000302,
+          "committed_conversations": 1,
+          "committed_nodes": 3,
+          "disk_preflight_free_bytes": 17871052800,
+          "disk_preflight_required_bytes": 1342177280,
+          "finalize_commit_seconds": 0.005592,
+          "fts_rebuild_seconds": 0.001001,
+          "import_batch_average_input_bytes": 893,
+          "import_batch_count": 1,
+          "import_batch_peak_decoded_chars": 893,
+          "import_batch_peak_estimated_heap_bytes": 8749,
+          "import_batch_peak_input_bytes": 893,
+          "import_batch_peak_metadata_bytes": 306,
+          "import_batch_peak_nodes": 3,
+          "import_batch_peak_raw_bytes": 431,
+          "import_batch_peak_sqlite_bind_bytes": 1146,
+          "import_batch_total_input_bytes": 893,
+          "import_index_rebuild_seconds": 9.8e-05,
+          "import_run_id": 1,
+          "inserted_conversations": 1,
+          "legacy_pre_commit_seconds": 0.010666,
+          "nodes": 3,
+          "parse_and_upsert_seconds": 0.002385,
+          "pipeline_return_seconds": 0.0,
+          "post_commit_summary_persistence_seconds": 7.1e-05,
+          "pragma_optimize_seconds": 0.0,
+          "skipped_invalid_elements": 0,
+          "source_scan_seconds": 0.001436,
+          "total_import_seconds": 0.016966,
+          "unchanged_conversations": 0,
+          "updated_conversations": 0,
+          "valid_conversations": 1,
+          "wall_total_seconds": 0.016966,
+          "warnings": 0
+        },
+        "order": 1,
+        "outcome": "imported",
+        "python": "3.12.14",
+        "run_status": "finished",
+        "sqlite": "3.53.1",
+        "verify": {
+          "diagnostic_bytes": 1395,
+          "diagnostic_sha256": "a879df04629b0927795fa97f5c97ce2add1c9f92df04afa7e710bc7078640f5d",
+          "exit_code": 0,
+          "seconds": 0.07992378500000541,
+          "stderr_bytes": 0,
+          "warnings": {}
+        },
+        "warnings": {}
+      },
+      "id": "3de510744bf7eb98f62df668ef4e1628e9cb03a0b923bc329435612d3115e627",
+      "status": "imported"
+    }
+  },
+  {
+    "command": [
+      "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+      "-m",
+      "poc.archive_controller",
+      "--root",
+      "<synthetic-temp>/active",
+      "verify"
+    ],
+    "exit_code": 0,
+    "result": {
+      "database": {
+        "diagnostic_bytes": 1395,
+        "diagnostic_sha256": "a879df04629b0927795fa97f5c97ce2add1c9f92df04afa7e710bc7078640f5d",
+        "exit_code": 0,
+        "seconds": 0.0663190579999764,
+        "stderr_bytes": 0,
+        "warnings": {}
+      },
+      "snapshots": 1
+    }
+  },
+  {
+    "command": [
+      "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+      "-m",
+      "poc.archive_controller",
+      "--root",
+      "<synthetic-temp>/active",
+      "preserve",
+      "<synthetic-temp>/cli-partial.zip"
+    ],
+    "exit_code": 0,
+    "result": {
+      "duplicate": false,
+      "id": "586117c2913ce778a35aaabbc919037ca1620eb3a01edb4d9cd1158d6a224bb4",
+      "status": "ready"
+    }
+  },
+  {
+    "command": [
+      "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+      "-m",
+      "poc.archive_controller",
+      "--root",
+      "<synthetic-temp>/active",
+      "import",
+      "586117c2913ce778a35aaabbc919037ca1620eb3a01edb4d9cd1158d6a224bb4",
+      "--after",
+      "3de510744bf7eb98f62df668ef4e1628e9cb03a0b923bc329435612d3115e627"
+    ],
+    "exit_code": 2,
+    "result": {
+      "attempt": {
+        "application_sha256": "7dfcebc16d779dfd79fb3219a26d918525b92b0b66110bdae3186dca97cf39ae",
+        "cli": {
+          "diagnostic_bytes": 924,
+          "diagnostic_sha256": "0dcbfffad7068496883005b8b3568f0eecf2d02e8ab033b5131eadedd9b268fc",
+          "exit_code": 0,
+          "seconds": 0.07055919499998708,
+          "stderr_bytes": 0,
+          "warnings": {}
+        },
+        "counts": {
+          "attempted_inserted_conversations": 0,
+          "attempted_nodes": 3,
+          "attempted_unchanged_conversations": 0,
+          "attempted_updated_conversations": 1,
+          "attempted_valid_conversations": 1,
+          "canonical_pipeline_seconds": 0.0,
+          "close_seconds": 0.000196,
+          "committed_conversations": 1,
+          "committed_nodes": 3,
+          "disk_preflight_free_bytes": 17870794752,
+          "disk_preflight_required_bytes": 1342177280,
+          "finalize_commit_seconds": 0.001146,
+          "fts_rebuild_seconds": 0.000682,
+          "import_batch_average_input_bytes": 893,
+          "import_batch_count": 1,
+          "import_batch_peak_decoded_chars": 893,
+          "import_batch_peak_estimated_heap_bytes": 8749,
+          "import_batch_peak_input_bytes": 893,
+          "import_batch_peak_metadata_bytes": 306,
+          "import_batch_peak_nodes": 3,
+          "import_batch_peak_raw_bytes": 431,
+          "import_batch_peak_sqlite_bind_bytes": 1146,
+          "import_batch_total_input_bytes": 893,
+          "import_index_rebuild_seconds": 2e-06,
+          "import_run_id": 2,
+          "inserted_conversations": 0,
+          "legacy_pre_commit_seconds": 0.006378,
+          "nodes": 3,
+          "parse_and_upsert_seconds": 0.001929,
+          "pipeline_return_seconds": 0.0,
+          "post_commit_summary_persistence_seconds": 4.5e-05,
+          "pragma_optimize_seconds": 0.0,
+          "skipped_invalid_elements": 1,
+          "source_scan_seconds": 0.000445,
+          "total_import_seconds": 0.007775,
+          "unchanged_conversations": 0,
+          "updated_conversations": 1,
+          "valid_conversations": 1,
+          "wall_total_seconds": 0.007775,
+          "warnings": 1
+        },
+        "order": 2,
+        "outcome": "partial",
+        "python": "3.12.14",
+        "run_status": "finished",
+        "sqlite": "3.53.1",
+        "warnings": {
+          "invalid_element_type": 1
+        }
+      },
+      "id": "586117c2913ce778a35aaabbc919037ca1620eb3a01edb4d9cd1158d6a224bb4",
+      "status": "partial"
+    }
+  }
+]

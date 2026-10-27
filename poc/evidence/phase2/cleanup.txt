@@ -1,0 +1,6 @@
+chatgpt_export_archiver/__pycache__
+poc/__pycache__
+poc/archive_controller/__pycache__
+generated_artifacts_found 3
+blocked_sensitive_paths_found 0
+dry_run false

@@ -1,0 +1,6 @@
+test_scale_1000_conversations_lifecycle (test_archive_lifecycle.Lifecycle.test_scale_1000_conversations_lifecycle) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 6.558s
+
+OK

@@ -1,0 +1,14 @@
+{
+  "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+  "sqlite": "3.53.1",
+  "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+  "branch": "poc/archive-evaluation",
+  "baseline_commit": "3c3e93b9cdbe0f44d909b343648422a0730a88a3",
+  "restic": null,
+  "gpg": [
+    "gpg (GnuPG) 2.4.7",
+    "libgcrypt 1.11.0"
+  ],
+  "fixtures": "synthetic only",
+  "remote_services_used": false
+}

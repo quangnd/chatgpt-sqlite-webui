@@ -1,0 +1,17 @@
+First lifecycle run: 15 tests, 13 passed, 2 failed; see first-run.txt.
+1. The initial controller freshness guard used aggregate_hash, which excludes
+   conversation titles and some top-level fields. The equal-time title-edit
+   fixture demonstrated the gap. Fixed by comparing all relevant canonical
+   conversation fields plus aggregate_hash. This was a POC controller defect;
+   unchanged application behavior was already the Phase 1 baseline.
+2. The simulated ENOSPC import fixture accidentally created a byte-identical ZIP,
+   so duplicate admission correctly bypassed the injected publication failure.
+   Fixed the synthetic fixture to contain a distinct newer conversation state.
+Second lifecycle run: all 15 passed; see second-run.txt.
+An initial GnuPG probe returned gpg_encryption_failed (exit 2): --no-autostart
+requires an available gpg-agent. The diagnostic was 'No agent running'. Added an
+explicit owned foreground agent with bounded startup/shutdown and a short private
+GNUPGHOME; subsequent encryption/decryption probes and full recovery tests pass.
+No restic executable was present, and no tool was installed. GnuPG was already
+installed. No user keyring, real credentials, cloud services or destinations used.
+Final retained suite covers 20 lifecycle tests plus all 11 Phase 1 POC cases.

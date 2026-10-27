@@ -1,0 +1,7 @@
+{
+  "poc/archive_controller/__main__.py": "824ef428f9c6d9f9e9c4e26aa5a9aca344d25420784f79e1c4d3ded4ca5a2565",
+  "poc/archive_controller/__init__.py": "8a8165ba51df5fbe46b70f3734b7086e5f484abfa2771e159f2673996a57885f",
+  "poc/archive_controller/controller.py": "c98a6a2c45c5bd36b0673bec1bacfa31f17d23165e0936559b353b8659d8fcca",
+  "poc/archive_controller/README.md": "159e1a55eff6caddcf39e683dcff9f30226e01a27e73ec16994b0631407a1df9",
+  "poc/test_archive_lifecycle.py": "169a0139f2c1fb0f5ee9355e2c90cdbb9c12ebb81d7ca0462082a461ece3aaee"
+}
